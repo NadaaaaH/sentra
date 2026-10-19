@@ -1,0 +1,80 @@
+export const sumberUtama = [
+    {
+      nama: 'Badan Pusat Statistik',
+      jenis: 'Sosial ekonomi & Potensi Desa',
+      pembaruan: 'Tahunan',
+      format: 'CSV / XLSX',
+      lisensi: 'Terbuka dengan atribusi',
+      url: 'https://www.bps.go.id',
+    },
+    {
+      nama: 'Badan Informasi Geospasial',
+      jenis: 'Batas administrasi wilayah',
+      pembaruan: 'Berkala',
+      format: 'GeoJSON / SHP',
+      lisensi: 'Kebijakan Satu Peta',
+      url: 'https://www.big.go.id',
+    },
+    {
+      nama: 'OpenStreetMap',
+      jenis: 'Jalan & fasilitas umum',
+      pembaruan: 'Tahunan',
+      format: 'OSM / GeoJSON',
+      lisensi: 'ODbL',
+      url: 'https://www.openstreetmap.org',
+    },
+    {
+      nama: 'Kementerian Kesehatan',
+      jenis: 'Fasilitas & tenaga kesehatan',
+      pembaruan: 'Tahunan',
+      format: 'CSV',
+      lisensi: 'Data publik',
+      url: 'https://www.kemkes.go.id',
+    },
+    {
+      nama: 'Kemendikdasmen',
+      jenis: 'Sekolah & partisipasi pendidikan',
+      pembaruan: 'Semester',
+      format: 'CSV',
+      lisensi: 'Data publik',
+      url: 'https://www.kemendikdasmen.go.id',
+    },
+  ]
+  
+  export const komponenIndeks = [
+    {
+      nama: 'Kemiskinan',
+      bobot: 25,
+      deskripsi: 'Kondisi sosial ekonomi dan persentase penduduk rentan.',
+      sumber: 'BPS - Podes & Susenas',
+      format: 'CSV / JSON',
+    },
+    {
+      nama: 'Pendidikan',
+      bobot: 20,
+      deskripsi: 'Sekolah, fasilitas pendidikan, dan angka partisipasi sekolah.',
+      sumber: 'Kemendikdasmen & BPS',
+      format: 'CSV',
+    },
+    {
+      nama: 'Kesehatan',
+      bobot: 20,
+      deskripsi: 'Akses puskesmas, rumah sakit, dan tenaga kesehatan.',
+      sumber: 'Kemenkes & Podes',
+      format: 'CSV / GeoJSON',
+    },
+    {
+      nama: 'Infrastruktur',
+      bobot: 20,
+      deskripsi: 'Jalan, air bersih, sanitasi, dan kelistrikan wilayah.',
+      sumber: 'PUPR, PLN & Podes',
+      format: 'CSV / GeoJSON',
+    },
+    {
+      nama: 'Akses internet',
+      bobot: 20,
+      deskripsi: 'Ketersediaan sinyal dan penetrasi internet rumah tangga.',
+      sumber: 'BPS & Komdigi',
+      format: 'CSV',
+    },
+  ]
