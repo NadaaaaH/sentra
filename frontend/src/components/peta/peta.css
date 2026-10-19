@@ -1,0 +1,14 @@
+/* Kursor normal saat diam */
+.leaflet-container,
+.leaflet-grab,
+.leaflet-touch-drag,
+.leaflet-touch-drag .leaflet-grab {
+  cursor: default !important;
+}
+
+/* Kursor 4 arah saat peta digeser (seperti Google Maps) */
+body.leaflet-dragging,
+body.leaflet-dragging *,
+.leaflet-drag-target {
+  cursor: move !important;
+}

@@ -1,0 +1,33 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Inter", sans-serif;
+  --font-roboto: "Roboto", sans-serif;
+  --font-mono: "IBM Plex Mono", monospace;
+  
+  /* OG COLOR PALETTE */
+  --color-sentra-green: #587042;
+  --color-sentra-lightgreen: #A9B494;
+  --color-sentra-cream: #FAF7E6;
+  --color-sentra-lightyellow: #F8DE8C;
+  --color-sentra-yellow: #F6C531;
+
+  --color-sentra-tinybitdarkercream: #FAF1E6;
+  --color-sentra-bitdarkercream: #F4EECF;
+  --color-sentra-darkergreen: #3E512C;
+  --color-sentra-lightergreen: #94C765;
+  --color-sentra-stroke: #D8D8D8;
+  --color-sentra-orange: #DE7F1A;
+  --color-sentra-red: #9B1C0F;
+}
+
+/* Kursor peta: panah biasa, berubah jadi 4 arah saat digeser */
+.leaflet-container,
+.leaflet-grab {
+  cursor: default !important;
+}
+
+.leaflet-dragging,
+.leaflet-dragging * {
+  cursor: move !important;
+}
