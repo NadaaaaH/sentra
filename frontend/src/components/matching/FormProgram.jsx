@@ -1,8 +1,9 @@
-import { ChevronDown } from 'lucide-react'
-import { bidangProgram } from '../../data/contohHasil'
+import { ChevronDown } from "lucide-react";
+import { bidangProgram } from "../../data/contohHasil";
+import axios from "axios";
 
 const inputClass =
-  'mt-1.5 w-full rounded-md border border-sentra-stroke bg-white px-3 py-2.5 text-sm outline-none placeholder:text-gray-400 focus:border-sentra-green'
+  "mt-1.5 w-full rounded-md border border-sentra-stroke bg-white px-3 py-2.5 text-sm outline-none placeholder:text-gray-400 focus:border-sentra-green";
 
 function FormProgram({ form, onChange, onSubmit }) {
   return (
@@ -21,7 +22,7 @@ function FormProgram({ form, onChange, onSubmit }) {
             onChange={onChange}
             required
             className={`${inputClass} cursor-pointer appearance-none ${
-              form.bidang === '' ? 'text-gray-400' : 'text-black'
+              form.bidang === "" ? "text-gray-400" : "text-black"
             }`}
           >
             <option value="" disabled>
@@ -86,7 +87,7 @@ function FormProgram({ form, onChange, onSubmit }) {
         Temukan wilayah
       </button>
     </form>
-  )
+  );
 }
 
-export default FormProgram
+export default FormProgram;
