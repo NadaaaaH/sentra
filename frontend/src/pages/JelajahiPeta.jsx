@@ -42,6 +42,12 @@ function JelajahiPeta() {
     setProfilTerbuka(false)
   }
 
+  const handleBukaLapisan = () => {
+    setPanelTerbuka(true)
+    // di HP, dua panel tidak muat bersamaan
+    if (window.innerWidth < 768) setProfilTerbuka(false)
+  }
+
   // klik pop-up: sidebar kanan terbuka, sidebar kiri (Lapisan) otomatis tertutup
   const handleBukaProfil = () => {
     setProfilTerbuka(true)
@@ -55,7 +61,7 @@ function JelajahiPeta() {
   }
 
   return (
-    <div className="relative isolate h-[calc(100vh-6rem)]">
+    <div className="relative isolate h-full">
       <MapContainer
         center={wilayahAwal ? wilayahAwal.posisi : [-7.15, 110.1]}
         zoom={9}
@@ -89,7 +95,7 @@ function JelajahiPeta() {
           onClose={() => setPanelTerbuka(false)}
         />
       ) : (
-        <LayerButton onClick={() => setPanelTerbuka(true)} />
+        <LayerButton onClick={handleBukaLapisan} />
       )}
 
       {terpilih && profilTerbuka && (

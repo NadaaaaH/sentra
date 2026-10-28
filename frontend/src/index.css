@@ -19,6 +19,10 @@
   --color-sentra-stroke: #D8D8D8;
   --color-sentra-orange: #DE7F1A;
   --color-sentra-red: #9B1C0F;
+
+  --color-sentra-page: #FDFBF2;
+  --color-sentra-hero: #798C65;
+  --color-sentra-sage: #D3D8C3;
 }
 
 /* Kursor peta: panah biasa, berubah jadi 4 arah saat digeser */
@@ -30,4 +34,73 @@
 .leaflet-dragging,
 .leaflet-dragging * {
   cursor: move !important;
+}
+
+/* 0.2 */
+@keyframes marquee {
+  from { transform: translateX(0); }
+  to { transform: translateX(-50%); }
+}
+
+.marquee-track {
+  animation: marquee 180s linear infinite;
+}
+
+.marquee:hover .marquee-track {
+  animation-play-state: paused;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .marquee-track { animation: none; }
+}
+
+@keyframes ombak {
+  from { transform: translateX(0); }
+  to { transform: translateX(-50%); }
+}
+
+.ombak-belakang {
+  animation: ombak 16s linear infinite;
+}
+
+.ombak-depan {
+  animation: ombak 9s linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ombak-belakang,
+  .ombak-depan {
+    animation: none;
+  }
+}
+
+@keyframes naik {
+  from { opacity: 0; transform: translateY(24px); }
+  to { opacity: 1; transform: none; }
+}
+
+@keyframes dari-kanan {
+  from { opacity: 0; transform: translateX(32px); }
+  to { opacity: 1; transform: none; }
+}
+
+.animasi-panel {
+  animation: naik 0.3s ease-out;
+}
+
+.animasi-profil {
+  animation: naik 0.3s ease-out;
+}
+
+@media (min-width: 768px) {
+  .animasi-profil {
+    animation-name: dari-kanan;
+  }
+}
+
+/* Tampilan default lebih ringkas di laptop/desktop (setara zoom browser 80%) */
+@media (min-width: 768px) {
+  html {
+    font-size: 80%;
+  }
 }

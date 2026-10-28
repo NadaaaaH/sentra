@@ -8,11 +8,9 @@ function TitikTerpilih({ terpilih, tampilPopup, onKlik, onBuka, onTutup }) {
 
   useMapEvents({
     click: (e) => {
-      // abaikan klik pada tombol zoom dan pop-up
       if (e.originalEvent.target.closest('[data-abaikan-klik]')) return
       onKlik(e.latlng)
     },
-    // hitung ulang posisi saat peta digeser atau di-zoom
     move: () => perbarui((n) => n + 1),
     zoom: () => perbarui((n) => n + 1),
     zoomend: () => perbarui((n) => n + 1),
@@ -24,6 +22,9 @@ function TitikTerpilih({ terpilih, tampilPopup, onKlik, onBuka, onTutup }) {
   const { x, y } = map.latLngToContainerPoint(terpilih.latlng)
   const { wilayah } = terpilih
 
+  // titik terlalu dekat tepi kanan: pop-up dibuka ke kiri
+  const balik = x > map.getSize().x - 260
+
   return (
     <>
       {tampilPopup && (
@@ -32,9 +33,10 @@ function TitikTerpilih({ terpilih, tampilPopup, onKlik, onBuka, onTutup }) {
           className="absolute z-[1000]"
           style={{ left: x, top: y - 36 }}
         >
-          {/* garis penunjuk: miring dari titik, lalu lurus ke kotak */}
           <svg
-            className="pointer-events-none absolute left-0 top-0 overflow-visible"
+            className={`pointer-events-none absolute left-0 top-0 overflow-visible ${
+              balik ? '-scale-x-100 origin-left' : ''
+            }`}
             width="64"
             height="36"
           >
@@ -46,7 +48,9 @@ function TitikTerpilih({ terpilih, tampilPopup, onKlik, onBuka, onTutup }) {
             tabIndex={0}
             onClick={onBuka}
             onKeyDown={(e) => e.key === 'Enter' && onBuka()}
-            className="absolute left-16 top-0 -translate-y-1/2 cursor-pointer whitespace-nowrap rounded-md border border-sentra-green bg-sentra-cream py-1 pl-2 pr-7 text-sm leading-tight shadow-md"
+            className={`absolute top-0 -translate-y-1/2 cursor-pointer whitespace-nowrap rounded-md border border-sentra-green bg-sentra-cream py-1 pl-2 pr-7 text-sm leading-tight shadow-md transition hover:shadow-lg ${
+              balik ? 'right-16' : 'left-16'
+            }`}
           >
             <p>{wilayah.nama}</p>
             <p>{wilayah.kabupaten}</p>
@@ -64,7 +68,6 @@ function TitikTerpilih({ terpilih, tampilPopup, onKlik, onBuka, onTutup }) {
         </div>
       )}
 
-      {/* titik cincin abu-abu */}
       <div
         className="pointer-events-none absolute z-[1000] flex h-3 w-3 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border-2 border-[#6b6f80] bg-[#e4e4ec]"
         style={{ left: x, top: y }}

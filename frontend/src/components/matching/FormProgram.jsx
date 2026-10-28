@@ -1,19 +1,18 @@
-import { ChevronDown } from "lucide-react";
-import { bidangProgram } from "../../data/contohHasil";
-import axios from "axios";
+import { ChevronDown } from 'lucide-react'
+import { bidangProgram } from '../../data/contohHasil'
 
 const inputClass =
-  "mt-1.5 w-full rounded-md border border-sentra-stroke bg-white px-3 py-2.5 text-sm outline-none placeholder:text-gray-400 focus:border-sentra-green";
+  'mt-1 w-full rounded-md border border-sentra-stroke bg-white px-3 py-2 text-sm outline-none placeholder:text-gray-400 focus:border-sentra-green'
 
 function FormProgram({ form, onChange, onSubmit }) {
   return (
     <form
       onSubmit={onSubmit}
-      className="w-full max-w-[443px] self-start border border-gray-500 bg-white p-6"
+      className="w-full self-start rounded-2xl border border-sentra-stroke bg-white p-5 shadow-lg lg:max-w-96"
     >
-      <h2 className="text-3xl font-medium">Rencana Program</h2>
+      <h2 className="text-2xl font-medium">Rencana Program</h2>
 
-      <label className="mt-6 block text-sm">
+      <label className="mt-4 block text-sm">
         Bidang program
         <div className="relative">
           <select
@@ -22,7 +21,7 @@ function FormProgram({ form, onChange, onSubmit }) {
             onChange={onChange}
             required
             className={`${inputClass} cursor-pointer appearance-none ${
-              form.bidang === "" ? "text-gray-400" : "text-black"
+              form.bidang === '' ? 'text-gray-400' : 'text-black'
             }`}
           >
             <option value="" disabled>
@@ -38,7 +37,7 @@ function FormProgram({ form, onChange, onSubmit }) {
         </div>
       </label>
 
-      <label className="mt-6 block text-sm">
+      <label className="mt-4 block text-sm">
         Anggaran tersedia (Rp)
         <input
           type="number"
@@ -52,7 +51,7 @@ function FormProgram({ form, onChange, onSubmit }) {
         />
       </label>
 
-      <label className="mt-6 block text-sm">
+      <label className="mt-4 block text-sm">
         Jumlah pelaksana
         <input
           type="number"
@@ -66,7 +65,7 @@ function FormProgram({ form, onChange, onSubmit }) {
         />
       </label>
 
-      <label className="mt-6 block text-sm">
+      <label className="mt-4 block text-sm">
         Durasi
         <input
           type="number"
@@ -82,12 +81,12 @@ function FormProgram({ form, onChange, onSubmit }) {
 
       <button
         type="submit"
-        className="mt-8 w-full cursor-pointer rounded-md bg-sentra-green py-3 text-lg font-semibold text-white hover:bg-sentra-darkergreen"
+        className="mt-6 w-full cursor-pointer rounded-md bg-sentra-green py-2.5 font-semibold text-white transition hover:-translate-y-0.5 hover:bg-sentra-darkergreen hover:shadow-lg"
       >
         Temukan wilayah
       </button>
     </form>
-  );
+  )
 }
 
-export default FormProgram;
+export default FormProgram
