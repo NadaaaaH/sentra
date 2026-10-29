@@ -3,6 +3,7 @@
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\Api\V1\RegionController;
+use App\Http\Controllers\Api\MapController;
 
 Route::get('/user', function (Request $request) {
     return $request->user();
@@ -27,4 +28,10 @@ Route::prefix('v1')->group(function () {
     // Route::apiResource('indicators', \App\Http\Controllers\Api\V1\IndicatorController::class);
     // Route::post('smart-matching', [\App\Http\Controllers\Api\V1\SmartMatchingController::class, 'match']);
     // Route::get('recommendations', [\App\Http\Controllers\Api\V1\RecommendationController::class, 'index']);
+});
+
+Route::prefix('map')->group(function () {
+    Route::get('/desa', [MapController::class, 'desaGeojson']);
+    Route::get('/faskes', [MapController::class, 'faskesGeojson']);
+    Route::get('/sekolah', [MapController::class, 'sekolahGeojson']);
 });
