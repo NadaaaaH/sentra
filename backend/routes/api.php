@@ -36,4 +36,5 @@ Route::prefix('map')->group(function () {
     Route::get('/sekolah', [MapController::class, 'sekolahGeojson']);
     Route::get('/kabupaten', [MapController::class, 'kabupatenGeojson']);
     Route::post('/cek-desa', [MapController::class, 'cekDesaByKoordinat']);
+    Route::get('/fasilitas-desa/{kode_desa}', [MapController::class, 'fasilitasDesa']);
 });
