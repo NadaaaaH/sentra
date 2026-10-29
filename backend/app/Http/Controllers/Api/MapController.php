@@ -114,4 +114,35 @@ class MapController extends Controller
             'features' => $features
         ]);
     }
+
+    /**
+     * Endpoint: GET /api/map/kabupaten
+     * Mengambil batas wilayah 35 Kabupaten/Kota di Jawa Tengah
+     */
+    public function kabupatenGeojson()
+    {
+        $data = DB::table('kabupaten_geom')
+            ->join('kabupaten', 'kabupaten_geom.kode_kab', '=', 'kabupaten.kode_kab')
+            ->select(
+                'kabupaten.kode_kab',
+                'kabupaten.nama_kabupaten',
+                DB::raw('ST_AsGeoJSON(kabupaten_geom.geom) as geometry')
+            )->get();
+
+        $features = $data->map(function ($item) {
+            return [
+                'type' => 'Feature',
+                'geometry' => json_decode($item->geometry),
+                'properties' => [
+                    'kode_kab' => $item->kode_kab,
+                    'nama_kab' => $item->nama_kabupaten,
+                ]
+            ];
+        });
+
+        return response()->json([
+            'type' => 'FeatureCollection',
+            'features' => $features
+        ]);
+    }
 }
