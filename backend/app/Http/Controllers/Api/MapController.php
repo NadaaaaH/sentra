@@ -236,4 +236,67 @@ class MapController extends Controller
             ]
         ]);
     }
+
+        /**
+     * Endpoint: GET /api/map/search?q=keyword
+     * Mencari Kabupaten atau Desa berdasarkan nama
+     */
+    public function searchWilayah(Request $request)
+    {
+        $keyword = $request->query('q');
+
+        if (!$keyword || strlen($keyword) < 3) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Keyword minimal 3 karakter.'
+            ], 400);
+        }
+
+        // 1. Cari di tabel Kabupaten
+        $kabupaten = DB::table('kabupaten_geom')
+            ->join('kabupaten', 'kabupaten_geom.kode_kab', '=', 'kabupaten.kode_kab')
+            ->where('kabupaten.nama_kabupaten', 'ILIKE', "%{$keyword}%")
+            ->select(
+                'kabupaten.kode_kab as kode',
+                'kabupaten.nama_kabupaten as nama',
+                DB::raw("'Kabupaten/Kota' as tipe"),
+                // Ambil titik tengah poligon untuk zoom peta
+                DB::raw('ST_Y(ST_Centroid(kabupaten_geom.geom)) as lat'),
+                DB::raw('ST_X(ST_Centroid(kabupaten_geom.geom)) as lng')
+            )
+            ->limit(5)
+            ->get();
+
+        // 2. Cari di tabel Desa
+        $desa = DB::table('desa_geom')
+            ->join('desa', 'desa_geom.kode_desa', '=', 'desa.kode_desa')
+            ->join('kecamatan', 'desa.kode_kec', '=', 'kecamatan.kode_kec')
+            ->join('kabupaten', 'kecamatan.kode_kab', '=', 'kabupaten.kode_kab')
+            ->where('desa.nama_desa', 'ILIKE', "%{$keyword}%")
+            ->select(
+                'desa.kode_desa as kode',
+                DB::raw("desa.nama_desa || ', ' || kecamatan.nama_kecamatan || ', ' || kabupaten.nama_kabupaten as nama"),
+                DB::raw("'Desa/Kelurahan' as tipe"),
+                DB::raw('ST_Y(ST_Centroid(desa_geom.geom)) as lat'),
+                DB::raw('ST_X(ST_Centroid(desa_geom.geom)) as lng')
+            )
+            ->limit(10)
+            ->get();
+
+        // Gabungkan hasil
+        $hasil = $kabupaten->concat($desa);
+
+        if ($hasil->isEmpty()) {
+            return response()->json([
+                'status' => 'success',
+                'message' => 'Wilayah tidak ditemukan.',
+                'data' => []
+            ]);
+        }
+
+        return response()->json([
+            'status' => 'success',
+            'data' => $hasil
+        ]);
+    }
 }
