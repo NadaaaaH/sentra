@@ -145,4 +145,53 @@ class MapController extends Controller
             'features' => $features
         ]);
     }
+
+    /**
+     * Endpoint: POST /api/map/cek-desa
+     * Mencari desa berdasarkan koordinat klik di peta (lat, lng)
+     */
+    public function cekDesaByKoordinat(Request $request)
+    {
+        // Validasi input dari Frontend
+        $request->validate([
+            'lat' => 'required|numeric',
+            'lng' => 'required|numeric',
+        ]);
+
+        $lat = $request->lat;
+        $lng = $request->lng;
+
+        // Query menggunakan PostGIS ST_Contains
+        // Membuat titik dari koordinat input, lalu mengecek titik mana yang masuk ke poligon desa
+        $desa = DB::table('desa_geom')
+            ->join('desa', 'desa_geom.kode_desa', '=', 'desa.kode_desa')
+            ->join('kecamatan', 'desa.kode_kec', '=', 'kecamatan.kode_kec')
+            ->join('kabupaten', 'kecamatan.kode_kab', '=', 'kabupaten.kode_kab')
+            ->leftJoin('indeks_urgensi', 'desa.kode_desa', '=', 'indeks_urgensi.kode_desa')
+            ->select(
+                'desa.kode_desa',
+                'desa.nama_desa',
+                'kecamatan.nama_kecamatan',
+                'kabupaten.nama_kabupaten',
+                'indeks_urgensi.kelas_urgensi',
+                'indeks_urgensi.label_urgensi',
+                'indeks_urgensi.skor_komposit'
+            )
+            // ST_SetSRID(ST_MakePoint(lng, lat), 4326) -> Membuat titik dari input user
+            // ST_Contains -> Mengecek apakah titik ada di dalam poligon desa_geom.geom
+            ->whereRaw("ST_Contains(desa_geom.geom, ST_SetSRID(ST_MakePoint(?, ?), 4326))", [$lng, $lat])
+            ->first(); // Ambil 1 desa (karena 1 titik cuma bisa masuk 1 desa)
+
+        if (!$desa) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Titik tidak berada di dalam wilayah desa manapun (mungkin di laut atau luar Jateng).'
+            ], 404);
+        }
+
+        return response()->json([
+            'status' => 'success',
+            'data' => $desa
+        ]);
+    }
 }
