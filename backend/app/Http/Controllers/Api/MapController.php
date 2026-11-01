@@ -10,35 +10,65 @@ class MapController extends Controller
 {
     /**
      * Endpoint: GET /api/map/desa
-     * Mengambil semua poligon desa (atau berdasarkan filter kelas urgensi)
+     * Mengambil poligon desa yang berpotongan dengan batas peta saat ini
      */
     public function desaGeojson(Request $request)
     {
+        $validated = $request->validate([
+            'west' => ['required', 'numeric', 'between:-180,180'],
+            'south' => ['required', 'numeric', 'between:-90,90'],
+            'east' => ['required', 'numeric', 'between:-180,180'],
+            'north' => ['required', 'numeric', 'between:-90,90'],
+            'zoom' => ['required', 'integer', 'between:10,18'],
+            'kab' => ['sometimes', 'string', 'max:4'],
+            'kelas' => ['sometimes', 'integer', 'between:1,5'],
+        ]);
+
+        if ($validated['west'] >= $validated['east'] || $validated['south'] >= $validated['north']) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Batas peta tidak valid.',
+            ], 422);
+        }
+
+        $toleransi = match (true) {
+            $validated['zoom'] >= 14 => 0.00005,
+            $validated['zoom'] >= 12 => 0.0002,
+            default => 0.0008,
+        };
+        $batasPeta = 'ST_MakeEnvelope(?, ?, ?, ?, 4326)';
+
         $query = DB::table('desa_geom')
             ->join('desa', 'desa_geom.kode_desa', '=', 'desa.kode_desa')
-            ->join('kecamatan', 'desa.kode_kec', '=', 'kecamatan.kode_kec') // Tambah join kecamatan
+            ->join('kecamatan', 'desa.kode_kec', '=', 'kecamatan.kode_kec')
             ->leftJoin('indeks_urgensi', 'desa.kode_desa', '=', 'indeks_urgensi.kode_desa')
             ->select(
                 'desa.kode_desa',
                 'desa.nama_desa',
                 'indeks_urgensi.kelas_urgensi',
                 'indeks_urgensi.label_urgensi',
-                DB::raw('ST_AsGeoJSON(desa_geom.geom) as geometry')
-            );
+                DB::raw("ST_AsGeoJSON(ST_SimplifyPreserveTopology(desa_geom.geom, {$toleransi}), 5) as geometry")
+            )
+            ->whereRaw("ST_Intersects(desa_geom.geom, {$batasPeta})", [
+                $validated['west'],
+                $validated['south'],
+                $validated['east'],
+                $validated['north'],
+            ])
+            ->limit(1501);
 
-        // Filter berdasarkan kabupaten (contoh: /api/map/desa?kab=3301)
-        if ($request->has('kab')) {
-            $query->where('kecamatan.kode_kab', $request->kab);
+        if (isset($validated['kab'])) {
+            $query->where('kecamatan.kode_kab', $validated['kab']);
         }
 
-        // Filter berdasarkan kelas urgensi
-        if ($request->has('kelas')) {
-            $query->where('indeks_urgensi.kelas_urgensi', $request->kelas);
+        if (isset($validated['kelas'])) {
+            $query->where('indeks_urgensi.kelas_urgensi', $validated['kelas']);
         }
 
         $data = $query->get();
+        $terpotong = $data->count() > 1500;
 
-        $features = $data->map(function ($item) {
+        $features = $data->take(1500)->map(function ($item) {
             return [
                 'type' => 'Feature',
                 'geometry' => json_decode($item->geometry),
@@ -47,14 +77,15 @@ class MapController extends Controller
                     'nama_desa' => $item->nama_desa,
                     'kelas' => $item->kelas_urgensi,
                     'label' => $item->label_urgensi ?? 'Belum Dinilai',
-                ]
+                ],
             ];
         });
 
         return response()->json([
             'type' => 'FeatureCollection',
-            'features' => $features
-        ]);
+            'features' => $features,
+            'truncated' => $terpotong,
+        ])->header('Cache-Control', 'public, max-age=120');
     }
 
     /**

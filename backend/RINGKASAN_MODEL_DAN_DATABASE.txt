@@ -1,0 +1,187 @@
+RINGKASAN MODEL DAN DATABASE BACKEND SENTRA
+============================================
+
+Dokumen ini merangkum seluruh file di backend/app/Models dan struktur tabel
+yang didefinisikan oleh migration di backend/database/migrations.
+
+PENTING:
+  Ini adalah inventaris berdasarkan kode repository, bukan hasil introspeksi
+  langsung ke database Supabase/production. Keberadaan tabel di database yang
+  sedang dipakai tetap bergantung pada migration yang sudah dijalankan di sana.
+
+DAFTAR MODEL
+------------
+
+1. Activity
+   File       : app/Models/Activity.php
+   Tabel      : activities
+   Primary key: id (default Eloquent)
+   Fillable   : title, category, description, min_budget, max_budget,
+                required_people, duration_days
+   Casts      : min_budget, max_budget, required_people, duration_days -> integer
+   Relasi     : tidak didefinisikan
+   Fungsi     : data kegiatan/program yang dapat direkomendasikan.
+
+2. Desa
+   File       : app/Models/Desa.php
+   Tabel      : desa
+   Primary key: kode_desa (string, bukan auto-increment)
+   Fillable   : kode_desa, kode_kec, nama_desa, unit_type, kode_temporary,
+                iks_2024, ike_2024, ikl_2024, nilai_idm_2024,
+                status_idm_2024, jarak_sekolah_resmi_km,
+                jarak_faskes_fix_km, faskes_terdekat,
+                tipe_faskes_terdekat
+   Casts      : kode_temporary -> boolean; iks_2024, ike_2024, ikl_2024,
+                nilai_idm_2024, jarak_sekolah_resmi_km,
+                jarak_faskes_fix_km -> float
+   Relasi     :
+     kecamatan()    belongsTo Kecamatan melalui kode_kec.
+     indeksUrgensi() hasOne IndeksUrgensi melalui kode_desa.
+
+3. IndeksUrgensi
+   File       : app/Models/IndeksUrgensi.php
+   Tabel      : indeks_urgensi
+   Primary key: id (default Eloquent)
+   Fillable   : kode_desa, skor_komposit, kelas_urgensi, label_urgensi,
+                flag_count, kode_temporary, daftar_masalah, rekomendasi,
+                calculated_at
+   Casts      : skor_komposit -> float; kelas_urgensi, flag_count -> integer;
+                kode_temporary -> boolean; calculated_at -> datetime
+   Relasi     :
+     desa() belongsTo Desa melalui kode_desa.
+
+4. Kabupaten
+   File       : app/Models/Kabupaten.php
+   Tabel      : kabupaten
+   Primary key: id (default Eloquent)
+   Fillable   : kode_kab, kode_prov, nama_kabupaten, tipe, rata2_idm_desa,
+                persen_miskin_kab, akses_air_minum_persen,
+                akses_internet_layak_persen, jumlah_rs_kab,
+                jumlah_sekolah_kab, jumlah_penduduk, rs_per_10rb_penduduk,
+                sekolah_per_10rb_penduduk
+   Casts      : semua kolom angka agregat di atas -> float
+   Relasi     :
+     provinsi() belongsTo Provinsi melalui kode_prov.
+     kecamatan() hasMany Kecamatan melalui kode_kab.
+
+5. Kecamatan
+   File       : app/Models/Kecamatan.php
+   Tabel      : kecamatan
+   Primary key: id (default Eloquent)
+   Fillable   : kode_kec, kode_kab, nama_kecamatan
+   Casts      : tidak didefinisikan
+   Relasi     :
+     kabupaten() belongsTo Kabupaten melalui kode_kab.
+     desa()      hasMany Desa melalui kode_kec.
+
+6. Provinsi
+   File       : app/Models/Provinsi.php
+   Tabel      : provinsi
+   Primary key: id (default Eloquent)
+   Fillable   : kode_prov, nama_provinsi
+   Casts      : tidak didefinisikan
+   Relasi     :
+     kabupaten() hasMany Kabupaten melalui kode_prov.
+
+7. SumberData
+   File       : app/Models/SumberData.php
+   Tabel      : sumber_data
+   Primary key: id (default Eloquent)
+   Fillable   : nama_sumber, url, deskripsi, tahun_data
+   Casts      : tahun_data -> integer
+   Relasi     : tidak didefinisikan
+   Fungsi     : metadata sumber dan tahun data.
+
+8. User
+   File       : app/Models/User.php
+   Tabel      : users (default model Authenticatable)
+   Primary key: id (default Eloquent)
+   Fillable   : name, email, password (atribut Fillable)
+   Hidden     : password, remember_token (tidak diserialisasi ke output)
+   Casts      : email_verified_at -> datetime; password -> hashed
+   Fitur      : autentikasi Laravel, notifications, factories, Sanctum API tokens.
+
+9. Potential
+   File       : app/Models/Potential.php
+   Status     : file kosong (0 byte); belum mendefinisikan class/model.
+   Tabel      : belum dapat ditentukan dari file model ini.
+
+10. Region
+    File       : app/Models/Region.php
+    Status     : file hanya berisi 2 byte; belum mendefinisikan class/model.
+    Tabel      : belum dapat ditentukan dari file model ini.
+
+11. RegionIndicator
+    File       : app/Models/RegionIndicator.php
+    Status     : file kosong (0 byte); belum mendefinisikan class/model.
+    Tabel      : belum dapat ditentukan dari file model ini.
+
+TABEL APLIKASI DARI MIGRATION
+-----------------------------
+
+1. activities
+   id, title, category, description, min_budget, max_budget, required_people,
+   duration_days, created_at, updated_at.
+
+2. provinsi
+   id, kode_prov (unik, char(2)), nama_provinsi, created_at, updated_at.
+
+3. kabupaten
+   id, kode_kab (unik, char(4)), kode_prov, nama_kabupaten, tipe,
+   rata2_idm_desa, persen_miskin_kab, akses_air_minum_persen,
+   akses_internet_layak_persen, jumlah_rs_kab, jumlah_sekolah_kab,
+   jumlah_penduduk, rs_per_10rb_penduduk, sekolah_per_10rb_penduduk,
+   created_at, updated_at.
+   Relasi database: kode_prov -> provinsi.kode_prov.
+
+4. kecamatan
+   id, kode_kec (unik, char(7)), kode_kab, nama_kecamatan,
+   created_at, updated_at.
+   Relasi database: kode_kab -> kabupaten.kode_kab.
+
+5. desa
+   id, kode_desa (unik, char(10)), kode_kec, nama_desa, unit_type,
+   kode_temporary, iks_2024, ike_2024, ikl_2024, nilai_idm_2024,
+   status_idm_2024, jarak_sekolah_resmi_km, jarak_faskes_fix_km,
+   faskes_terdekat, tipe_faskes_terdekat, created_at, updated_at.
+   Relasi database: kode_kec -> kecamatan.kode_kec.
+   kode_temporary ditambahkan oleh migration berikutnya dengan default false.
+
+6. indeks_urgensi
+   id, kode_desa (unik, char(10)), skor_komposit, kelas_urgensi,
+   label_urgensi, flag_count, kode_temporary, daftar_masalah, rekomendasi,
+   calculated_at, created_at, updated_at.
+   Relasi database: kode_desa -> desa.kode_desa.
+   kode_temporary ditambahkan oleh migration berikutnya dengan default false.
+
+7. sumber_data
+   id, nama_sumber, url, deskripsi, tahun_data, created_at, updated_at.
+
+TABEL LARAVEL / INFRASTRUKTUR DARI MIGRATION
+---------------------------------------------
+
+- users: id, name, email, email_verified_at, password, remember_token,
+  created_at, updated_at.
+- password_reset_tokens: email, token, created_at.
+- sessions: id, user_id, ip_address, user_agent, payload, last_activity.
+- cache: key, value, expiration.
+- cache_locks: key, owner, expiration.
+- jobs: id, queue, payload, attempts, reserved_at, available_at, created_at.
+- job_batches: id, name, total_jobs, pending_jobs, failed_jobs,
+  failed_job_ids, options, cancelled_at, created_at, finished_at.
+- failed_jobs: id, uuid, connection, queue, payload, exception, failed_at.
+- personal_access_tokens: id, tokenable_type, tokenable_id, name, token,
+  abilities, last_used_at, expires_at, created_at, updated_at.
+
+CATATAN
+-------
+
+- Model Potential, Region, dan RegionIndicator saat ini kosong/tidak lengkap;
+  ketiganya belum menjadi model Eloquent yang berfungsi.
+- Migration mendefinisikan tabel dan kolom di repository, tetapi tidak
+  membuktikan migration sudah dijalankan di database remote.
+- Desa dan IndeksUrgensi menggunakan kode string sebagai relasi antartabel,
+  walaupun migration juga membuat kolom id auto-increment pada tabel tersebut.
+- Model Desa secara eksplisit memakai kode_desa sebagai primary key, sesuai
+  pengaturan pada model; migration menjadikan kode_desa unik dan tetap membuat
+  kolom id.

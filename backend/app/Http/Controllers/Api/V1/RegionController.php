@@ -3,8 +3,8 @@
 namespace App\Http\Controllers\Api\V1;
 
 use App\Http\Controllers\Controller;
-use App\Models\Desa;
 use App\Http\Resources\V1\DesaDetailResource;
+use App\Models\Desa;
 use App\Traits\ApiResponse;
 
 class RegionController extends Controller
@@ -21,14 +21,14 @@ class RegionController extends Controller
             ->where('kode_desa', $kode_desa)
             ->first();
 
-        if (!$desa) {
-            return $this->errorResponse('Data desa tidak ditemukan', 404);
+        if (! $desa) {
+            return $this->error('Data desa tidak ditemukan', 404);
         }
 
         return (new DesaDetailResource($desa))
             ->additional([
-                'status'  => 'Success',
-                'message' => 'Detail profil desa berhasil dimuat.'
+                'status' => 'Success',
+                'message' => 'Detail profil desa berhasil dimuat.',
             ]);
     }
 }
