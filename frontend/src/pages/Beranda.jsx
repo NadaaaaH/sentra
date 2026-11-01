@@ -8,6 +8,12 @@ import {
   Database,
 } from 'lucide-react'
 import FeatureCard from '../components/FeatureCard'
+import Reveal from '../components/Reveal'
+import FiturMarquee from '../components/FiturMarquee'
+import KonturLatar from '../components/KonturLatar'
+import HeroVisual from '../components/HeroVisual'
+import Gelombang from '../components/Gelombang'
+import { Link } from 'react-router'
 
 const fitur = [
   {
@@ -70,53 +76,72 @@ function Beranda() {
   return (
     <div>
       {/* HERO */}
-      <section className="bg-sentra-green/80 px-32 py-24">
-        <p className="text-lg font-bold tracking-[0.2em] text-sentra-darkergreen">
-          SELAMAT DATANG DI
-        </p>
+      <section className="relative overflow-hidden bg-sentra-hero px-6 pb-24 pt-16 md:px-16 lg:px-32 lg:pb-28 lg:pt-16">
+        <KonturLatar />
+        <Gelombang
+          className="absolute inset-x-0 -bottom-px z-[1] h-10 md:h-16"
+          belakang="#A9B494"
+          depan="#FDFBF2"
+        />
+        
+        <div className="relative z-10 mx-auto grid max-w-7xl items-center gap-12 lg:grid-cols-2">
+          <div>
+            <p className="text-lg font-bold tracking-[0.2em] text-sentra-darkergreen">
+              SELAMAT DATANG DI
+            </p>
 
-        <h1 className="text-8xl font-extrabold text-sentra-bitdarkercream">
-          SENTRA
-        </h1>
+            <h1 className="text-5xl font-extrabold text-sentra-bitdarkercream md:text-7xl lg:text-7xl">
+              SENTRA
+            </h1>
 
-        <h2 className="text-4xl font-semibold text-sentra-bitdarkercream">
-          Spatial Needs & Response Analytics
-        </h2>
+            <h2 className="text-2xl font-semibold text-sentra-bitdarkercream md:text-3xl">
+              Spatial Needs & Response Analytics
+            </h2>
 
-        <p className="mt-6 max-w-2xl text-xl leading-snug text-white">
-          Platform Informasi Geografis untuk memetakan kebutuhan wilayah,
-          menganalisis data sektoral, dan memberikan rekomendasi program
-          pembangunan yang tepat sasaran berbasis wilayah di Jawa Tengah
-        </p>
+            <p className="mt-6 max-w-2xl text-lg leading-snug text-sentra-cream">
+              Platform Informasi Geografis untuk memetakan kebutuhan wilayah,
+              menganalisis data sektoral, dan memberikan rekomendasi program
+              pembangunan yang tepat sasaran berbasis wilayah di Jawa Tengah
+            </p>
 
-        <div className="mt-10 flex max-w-3xl items-center gap-3 bg-white px-5 py-4 shadow">
-          <Search className="h-6 w-6 text-black" />
-          <input
-            type="text"
-            placeholder="Cari wilayah di Jawa Tegah"
-            className="w-full bg-transparent text-xl outline-none placeholder:text-gray-400"
-          />
+            <div className="mt-10 flex max-w-3xl items-center gap-3 bg-white px-5 py-3 shadow-lg">
+              <Search className="h-6 w-6 text-black" />
+              <input
+                type="text"
+                placeholder="Cari wilayah di Jawa Tengah"
+                className="w-full bg-transparent text-lg outline-none placeholder:text-gray-400"
+              />
+            </div>
+          </div>
+
+          <HeroVisual />
         </div>
       </section>
 
       {/* FITUR UTAMA */}
-      <section className="px-32 py-20">
-        <h2 className="text-center text-4xl font-bold tracking-[0.2em] text-sentra-green">
-          Fitur Utama
-        </h2>
-        
-        <div className="mx-auto mt-14 grid max-w-5xl grid-cols-3 gap-x-32 gap-y-10">
-          {fitur.map((item) => (
-            <FeatureCard key={item.title} {...item} />
-            ))}
+      <section className="bg-sentra-page py-16 lg:py-20">
+        <Reveal>
+          <h2 className="px-6 text-center text-3xl font-bold tracking-[0.2em] text-sentra-green md:text-4xl">
+            Fitur Utama
+          </h2>
+          <p className="mx-auto mt-3 max-w-xl px-6 text-center text-gray-500">
+            Semua yang Anda butuhkan untuk memahami kebutuhan wilayah dan
+            menentukan program yang tepat.
+          </p>
+        </Reveal>
+
+        <div className="mt-8">
+          <FiturMarquee daftar={fitur} />
         </div>
       </section>
 
       {/* CARA KERJA SENTRA */}
-      <section className="bg-sentra-lightgreen/50 px-28 py-16">
+      <section className="bg-sentra-sage px-6 py-12 md:px-16 lg:py-16">
+      <div className="mx-auto max-w-7xl">
         <h2 className="text-xl font-semibold tracking-[0.15em] text-sentra-green">
           CARA KERJA SENTRA
         </h2>
+      </div>
 
         <div className="mt-10 grid grid-cols-3 gap-10">
           {caraKerja.map((item) => (
@@ -132,6 +157,34 @@ function Beranda() {
             </div>
           ))}
         </div>
+      </section>
+            {/* AJAKAN BERTINDAK */}
+            <section className="px-6 py-16 lg:py-20">
+        <Reveal>
+          <div className="mx-auto max-w-5xl rounded-3xl bg-sentra-darkergreen px-8 py-12 text-center text-sentra-cream shadow-xl">
+            <h2 className="text-3xl font-bold md:text-4xl">
+              Siap menjelajahi Jawa Tengah?
+            </h2>
+            <p className="mx-auto mt-3 max-w-xl text-sentra-cream/80">
+              Lihat kebutuhan tiap wilayah di peta, atau cocokkan rencana
+              programmu dengan wilayah yang paling membutuhkan.
+            </p>
+            <div className="mt-8 flex flex-col items-center justify-center gap-4 sm:flex-row">
+              <Link
+                to="/peta"
+                className="rounded-full bg-sentra-yellow px-7 py-3 font-semibold text-black transition hover:-translate-y-0.5 hover:shadow-lg"
+              >
+                Jelajahi Peta
+              </Link>
+              <Link
+                to="/smart-matching"
+                className="rounded-full border border-sentra-cream/60 px-7 py-3 font-semibold transition hover:-translate-y-0.5 hover:bg-white/10"
+              >
+                Coba Smart Matching
+              </Link>
+            </div>
+          </div>
+        </Reveal>
       </section>
     </div>
   )

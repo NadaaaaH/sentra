@@ -25,7 +25,7 @@ function LayerItem({ label, aktif, onClick }) {
 
 function LayerPanel({ aktif, onToggle, onClose }) {
   return (
-    <div className="absolute bottom-5 left-12 z-[1000] max-h-[calc(100%-2.5rem)] w-[337px] overflow-y-auto rounded-2xl bg-sentra-cream p-5 shadow-lg">
+    <div className="animasi-panel absolute inset-x-0 bottom-0 z-[1000] max-h-[65%] w-full overflow-y-auto rounded-t-2xl bg-sentra-cream p-5 shadow-lg md:inset-x-auto md:bottom-5 md:left-12 md:max-h-[calc(100%-2.5rem)] md:w-[337px] md:rounded-2xl">
       <div className="flex items-center justify-between">
         <h3 className="font-medium">Lapisan Administrasi Wilayah</h3>
         <button onClick={onClose} className="cursor-pointer" aria-label="Tutup panel">

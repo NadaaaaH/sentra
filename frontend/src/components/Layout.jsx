@@ -1,15 +1,22 @@
-import { Outlet } from 'react-router'
+import { Outlet, useLocation } from 'react-router'
 import Navbar from './Navbar'
 import Footer from './Footer'
 
 function Layout() {
+  const { pathname } = useLocation()
+  const halamanPeta = pathname.startsWith('/peta')
+
   return (
-    <div className="flex min-h-screen flex-col bg-sentra-cream/50">
+    <div
+      className={`flex flex-col bg-sentra-page ${
+        halamanPeta ? 'h-screen overflow-hidden' : 'min-h-screen'
+      }`}
+    >
       <Navbar />
-      <main className="flex-1">
+      <main className={halamanPeta ? 'relative min-h-0 flex-1' : 'flex-1'}>
         <Outlet />
       </main>
-      <Footer />
+      {!halamanPeta && <Footer />}
     </div>
   )
 }
