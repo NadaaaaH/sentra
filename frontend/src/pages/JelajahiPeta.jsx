@@ -1,33 +1,50 @@
+import { useState, useCallback } from 'react'
+import { useLocation } from 'react-router'
+import { MapContainer } from 'react-leaflet'
 import 'leaflet/dist/leaflet.css'
 import '../components/peta/peta.css'
-import { useState } from 'react'
-import { useLocation } from 'react-router'
-import { MapContainer, TileLayer } from 'react-leaflet'
-import { cariWilayahTerdekat, cariWilayahById } from '../data/contohWilayah'
 import SearchBar from '../components/peta/SearchBar'
 import LayerButton from '../components/peta/LayerButton'
 import LayerPanel from '../components/peta/LayerPanel'
 import ZoomButtons from '../components/peta/ZoomButtons'
-import TitikTerpilih from '../components/peta/TitikTerpilih'
 import ProfilWilayah from '../components/peta/ProfilWilayah'
+import PetaWilayah from '../components/peta/PetaWilayah'
+import jateng from '../data/jateng.json'
+import { buatProfil } from '../data/profilKabupaten'
+import { cariWilayahById } from '../data/contohWilayah'
 
-const BATAS_JAWA_TENGAH = [
-  [-8.8, 108.0],
-  [-5.8, 112.2],
+const BATAS_INDONESIA = [
+  [-16, 85],
+  [12, 150],
 ]
 
+const LABEL_INDIKATOR = {
+  kemiskinan: 'Kemiskinan',
+  pendidikan: 'Pendidikan',
+  kesehatan: 'Kesehatan',
+  internet: 'Akses Internet',
+  infrastruktur: 'Infrastruktur',
+}
+
+// laut bergradasi dengan pola titik halus
+const LATAR_LAUT = {
+  background:
+    'radial-gradient(rgba(88,112,66,0.14) 1px, transparent 1.6px) 0 0 / 24px 24px, radial-gradient(circle at 30% 20%, #F5FAFC, #D9E6EB)',
+}
+
 function JelajahiPeta() {
-  const [panelTerbuka, setPanelTerbuka] = useState(false)
-  const [aktif, setAktif] = useState({ administrasi: null, indikator: null })
   const { state } = useLocation()
 
-  // kalau datang dari Smart Matching, langsung pilih wilayahnya dan buka sidebar
-  const wilayahAwal = state?.wilayahId ? cariWilayahById(state.wilayahId) : null
+  const desaAwal = state?.wilayahId ? cariWilayahById(state.wilayahId) : null
+  const fiturAwal = desaAwal
+    ? jateng.features.find((f) => f.properties.label === desaAwal.kabupaten)
+    : null
 
-  const [terpilih, setTerpilih] = useState(
-    wilayahAwal ? { latlng: { lat: wilayahAwal.posisi[0], lng: wilayahAwal.posisi[1] }, wilayah: wilayahAwal } : null
-  )
-  const [profilTerbuka, setProfilTerbuka] = useState(wilayahAwal !== null)
+  const [panelTerbuka, setPanelTerbuka] = useState(false)
+  const [aktif, setAktif] = useState({ administrasi: null, indikator: null })
+  const [terpilihId, setTerpilihId] = useState(fiturAwal?.properties.id ?? null)
+  const [profil, setProfil] = useState(desaAwal)
+  const [profilTerbuka, setProfilTerbuka] = useState(Boolean(desaAwal))
 
   const toggleLapisan = (kelompok, id) => {
     setAktif((sebelumnya) => ({
@@ -36,54 +53,42 @@ function JelajahiPeta() {
     }))
   }
 
-  // klik peta: titik dan pop-up pindah ke lokasi baru, sidebar kanan tertutup
-  const handleKlikPeta = (latlng) => {
-    setTerpilih({ latlng, wilayah: cariWilayahTerdekat(latlng) })
+  const handlePilih = useCallback((feature) => {
+    setTerpilihId(feature.properties.id)
+    setProfil(buatProfil(feature.properties))
+    setProfilTerbuka(true)
+    setPanelTerbuka(false)
+  }, [])
+
+  const handleTutupProfil = () => {
     setProfilTerbuka(false)
+    setTerpilihId(null)
   }
 
   const handleBukaLapisan = () => {
     setPanelTerbuka(true)
-    // di HP, dua panel tidak muat bersamaan
-    if (window.innerWidth < 768) setProfilTerbuka(false)
-  }
-
-  // klik pop-up: sidebar kanan terbuka, sidebar kiri (Lapisan) otomatis tertutup
-  const handleBukaProfil = () => {
-    setProfilTerbuka(true)
-    setPanelTerbuka(false)
-  }
-
-  // X pada pop-up: pop-up dan titik hilang
-  const handleTutupPopup = () => {
-    setTerpilih(null)
-    setProfilTerbuka(false)
+    if (window.innerWidth < 768) handleTutupProfil()
   }
 
   return (
     <div className="relative isolate h-full">
       <MapContainer
-        center={wilayahAwal ? wilayahAwal.posisi : [-7.15, 110.1]}
-        zoom={9}
-        minZoom={9}
-        maxBounds={BATAS_JAWA_TENGAH}
+        center={[-2.5, 118]}
+        zoom={5.5}
+        minZoom={5.5}
+        zoomSnap={0.25}
+        maxBounds={BATAS_INDONESIA}
         maxBoundsViscosity={1.0}
         zoomControl={false}
         className="h-full w-full"
+        style={LATAR_LAUT}
       >
-        <TileLayer
-          attribution="&copy; OpenStreetMap contributors"
-          url="https://tile.openstreetmap.org/{z}/{x}/{y}.png"
-          noWrap={true}
+        <PetaWilayah
+          terpilihId={terpilihId}
+          indikator={LABEL_INDIKATOR[aktif.indikator] ?? null}
+          onPilih={handlePilih}
         />
         <ZoomButtons />
-        <TitikTerpilih
-          terpilih={terpilih}
-          tampilPopup={!profilTerbuka}
-          onKlik={handleKlikPeta}
-          onBuka={handleBukaProfil}
-          onTutup={handleTutupPopup}
-        />
       </MapContainer>
 
       <SearchBar />
@@ -98,11 +103,8 @@ function JelajahiPeta() {
         <LayerButton onClick={handleBukaLapisan} />
       )}
 
-      {terpilih && profilTerbuka && (
-        <ProfilWilayah
-          wilayah={terpilih.wilayah}
-          onClose={() => setProfilTerbuka(false)}
-        />
+      {profil && profilTerbuka && (
+        <ProfilWilayah wilayah={profil} onClose={handleTutupProfil} />
       )}
     </div>
   )

@@ -30,7 +30,7 @@ function SmartMatching() {
   }
 
   return (
-    <div className="mx-auto flex max-w-6xl flex-col gap-6 px-6 py-6 lg:flex-row lg:gap-8 lg:px-10 lg:py-8">
+    <div className="mx-auto flex min-h-[calc(100vh-8rem)] max-w-7xl flex-col gap-6 px-6 py-10 lg:flex-row lg:gap-10 lg:px-14 lg:py-16">
       <FormProgram form={form} onChange={handleChange} onSubmit={handleSubmit} />
       <HasilPencocokan hasil={hasil} memuat={memuat} />
     </div>

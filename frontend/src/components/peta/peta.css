@@ -12,3 +12,58 @@ body.leaflet-dragging *,
 .leaflet-drag-target {
   cursor: move !important;
 }
+
+/* Susunan lapisan */
+.leaflet-indonesia-pane {
+  z-index: 410;
+}
+
+/* Jawa Tengah tampak melayang: bayangan jatuh ke bawah */
+.leaflet-jateng-pane {
+  z-index: 420;
+  filter: drop-shadow(0 7px 5px rgba(25, 40, 15, 0.35));
+}
+
+/* Kawasan yang terangkat: naik 9px dengan bayangan lebih tebal */
+.leaflet-angkat-pane {
+  z-index: 430;
+  filter: drop-shadow(0 18px 10px rgba(20, 30, 10, 0.45));
+}
+
+@keyframes angkat-naik {
+  from { transform: translateY(0); }
+  to { transform: translateY(-9px); }
+}
+
+.leaflet-angkat-pane path {
+  animation: angkat-naik 0.25s ease-out forwards;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .leaflet-angkat-pane path {
+    animation: none;
+    transform: translateY(-9px);
+  }
+}
+
+/* Nama kabupaten: hanya tampil saat zoom dekat */
+.label-kab {
+  display: none;
+  background: transparent;
+  border: none;
+  box-shadow: none;
+  padding: 0;
+  color: #1f2d14;
+  font-size: 11px;
+  font-weight: 700;
+  text-shadow: 0 0 3px #fff, 0 0 3px #fff, 0 0 5px #fff;
+  white-space: nowrap;
+}
+
+.label-kab::before {
+  display: none !important;
+}
+
+.zoom-dekat .label-kab {
+  display: block;
+}

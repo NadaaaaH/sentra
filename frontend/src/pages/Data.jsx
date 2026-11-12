@@ -3,13 +3,15 @@ import { sumberUtama, komponenIndeks } from '../data/sumberData'
 import Reveal from '../components/Reveal'
 import KonturLatar from '../components/KonturLatar'
 import Gelombang from '../components/Gelombang'
+import BatikLatar from '../components/BatikLatar'
 
 function Data() {
   return (
     <div>
       {/* HERO */}
-      <section className="relative overflow-hidden bg-sentra-green px-6 pb-20 pt-10 md:px-14 md:pb-24 md:pt-14">
+      <section className="relative overflow-hidden bg-sentra-hero px-6 pb-20 pt-10 md:px-14 md:pb-24 md:pt-14">
         <KonturLatar />
+        <BatikLatar />
         <Gelombang
           className="absolute inset-x-0 -bottom-px z-[1] h-10 md:h-16"
           belakang="#A9B494"
@@ -27,21 +29,6 @@ function Data() {
             Setiap skor SENTRA dapat ditelusuri. Pelajari asal data, pembaruan,
             format, lisensi, serta cara setiap indikator digunakan.
           </p>
-
-          <div className="mt-8 flex flex-wrap gap-4">
-            {[
-              { angka: sumberUtama.length, label: 'Sumber data utama' },
-              { angka: komponenIndeks.length, label: 'Indikator urgensi' },
-            ].map((s) => (
-              <div
-                key={s.label}
-                className="rounded-xl bg-white/10 px-5 py-3 backdrop-blur-sm"
-              >
-                <p className="text-3xl font-bold text-sentra-cream">{s.angka}</p>
-                <p className="text-sm text-sentra-cream/80">{s.label}</p>
-              </div>
-            ))}
-          </div>
         </div>
       </section>
 

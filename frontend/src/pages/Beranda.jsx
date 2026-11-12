@@ -13,6 +13,9 @@ import FiturMarquee from '../components/FiturMarquee'
 import KonturLatar from '../components/KonturLatar'
 import HeroVisual from '../components/HeroVisual'
 import Gelombang from '../components/Gelombang'
+import BatikLatar from '../components/BatikLatar'
+import PetaMini from '../components/PetaMini'
+import Statistik from '../components/Statistik'
 import { Link } from 'react-router'
 
 const fitur = [
@@ -32,25 +35,25 @@ const fitur = [
     icon: Siren,
     title: 'Indeks Urgensi',
     description: 'Tentukan prioritas wilayah berdasarkan data dan pembobotan indikator.',
-    tone: 'green',
+    tone: 'orange',
   },
   {
     icon: Lightbulb,
     title: 'Rekomendasi Program',
     description: 'Dapatkan rekomendasi program yang sesuai dengan kebutuhan wilayah.',
-    tone: 'yellow',
+    tone: 'soga',
   },
   {
     icon: Link2,
     title: 'Smart Matching',
     description: 'Cocokkan program dengan wilayah yang paling sesuai berdasarkan kriteria.',
-    tone: 'green',
+    tone: 'teal',
   },
   {
     icon: Database,
     title: 'Data & Sumber',
     description: 'Akses data indikator, data wilayah, dan data lainnya dari sumber terpercaya.',
-    tone: 'yellow',
+    tone: 'green',
   },
 ]
 
@@ -78,6 +81,7 @@ function Beranda() {
       {/* HERO */}
       <section className="relative overflow-hidden bg-sentra-hero px-6 pb-24 pt-16 md:px-16 lg:px-32 lg:pb-28 lg:pt-16">
         <KonturLatar />
+        <BatikLatar />
         <Gelombang
           className="absolute inset-x-0 -bottom-px z-[1] h-10 md:h-16"
           belakang="#A9B494"
@@ -87,7 +91,7 @@ function Beranda() {
         <div className="relative z-10 mx-auto grid max-w-7xl items-center gap-12 lg:grid-cols-2">
           <div>
             <p className="text-lg font-bold tracking-[0.2em] text-sentra-darkergreen">
-              SELAMAT DATANG DI
+              SELAMAT DATANG DI 
             </p>
 
             <h1 className="text-5xl font-extrabold text-sentra-bitdarkercream md:text-7xl lg:text-7xl">
@@ -104,7 +108,7 @@ function Beranda() {
               pembangunan yang tepat sasaran berbasis wilayah di Jawa Tengah
             </p>
 
-            <div className="mt-10 flex max-w-3xl items-center gap-3 bg-white px-5 py-3 shadow-lg">
+            <div className="mt-10 flex max-w-3xl items-center gap-3 rounded-full bg-white px-6 py-3 shadow-lg transition duration-300 focus-within:-translate-y-0.5 focus-within:shadow-2xl focus-within:ring-4 focus-within:ring-sentra-lightyellow/70">
               <Search className="h-6 w-6 text-black" />
               <input
                 type="text"
@@ -120,6 +124,8 @@ function Beranda() {
 
       {/* FITUR UTAMA */}
       <section className="bg-sentra-page py-16 lg:py-20">
+      <PetaMini />
+      <Statistik />
         <Reveal>
           <h2 className="px-6 text-center text-3xl font-bold tracking-[0.2em] text-sentra-green md:text-4xl">
             Fitur Utama
@@ -137,29 +143,40 @@ function Beranda() {
 
       {/* CARA KERJA SENTRA */}
       <section className="bg-sentra-sage px-6 py-12 md:px-16 lg:py-16">
-      <div className="mx-auto max-w-7xl">
-        <h2 className="text-xl font-semibold tracking-[0.15em] text-sentra-green">
-          CARA KERJA SENTRA
-        </h2>
-      </div>
+        <div className="mx-auto max-w-7xl">
+          <Reveal>
+            <h2 className="text-xl font-semibold tracking-[0.15em] text-sentra-green">
+              CARA KERJA SENTRA
+            </h2>
+          </Reveal>
 
-        <div className="mt-10 grid grid-cols-3 gap-10">
-          {caraKerja.map((item) => (
-            <div
-              key={item.title}
-              className="rounded-lg border border-sentra-stroke bg-sentra-tinybitdarkercream p-7">
-              <h3 className="font-mono text-xl font-semibold tracking-widest text-black">
-                {item.title}
-              </h3>
-              <p className="mt-3 font-mono text-sm leading-relaxed tracking-widest text-gray-700">
-                {item.description}
-              </p>
-            </div>
-          ))}
+          <div className="mt-10 grid grid-cols-1 gap-8 pt-4 md:grid-cols-3 md:gap-10">
+            {caraKerja.map((item, i) => (
+              <Reveal key={item.title} delay={i * 0.12} className="h-full">
+                <div className="group relative h-full">
+                  <span
+                    className={`absolute -left-4 -top-4 z-10 flex h-11 w-11 origin-bottom-right items-center justify-center rounded-full text-lg font-bold text-sentra-cream shadow-md ring-4 ring-sentra-sage transition duration-500 ease-[cubic-bezier(0.22,1,0.36,1)] group-hover:-translate-x-2 group-hover:-rotate-[22deg] motion-reduce:transition-none ${
+                      ['bg-sentra-green', 'bg-sentra-orange', 'bg-sentra-soga'][i]
+                    }`}
+                  >
+                    {i + 1}
+                  </span>
+
+                  <div className="h-full origin-top-left rounded-lg border border-sentra-stroke bg-sentra-tinybitdarkercream p-7 shadow-sm transition duration-500 ease-[cubic-bezier(0.22,1,0.36,1)] group-hover:translate-x-2 group-hover:rotate-[2deg] group-hover:shadow-xl motion-reduce:transition-none">
+                    <h3 className="text-xl font-semibold text-black">{item.title}</h3>
+                    <p className="mt-3 text-sm leading-relaxed text-gray-700">
+                      {item.description}
+                    </p>
+                  </div>
+                </div>
+              </Reveal>
+            ))}
+          </div>
         </div>
       </section>
-            {/* AJAKAN BERTINDAK */}
-            <section className="px-6 py-16 lg:py-20">
+
+      {/* AJAKAN BERTINDAK */}
+      <section className="px-6 py-16 lg:py-20">
         <Reveal>
           <div className="mx-auto max-w-5xl rounded-3xl bg-sentra-darkergreen px-8 py-12 text-center text-sentra-cream shadow-xl">
             <h2 className="text-3xl font-bold md:text-4xl">
