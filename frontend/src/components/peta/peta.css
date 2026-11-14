@@ -67,3 +67,5 @@ body.leaflet-dragging *,
 .zoom-dekat .label-kab {
   display: block;
 }
+
+.mode-desa .label-kab { opacity: 0; }
