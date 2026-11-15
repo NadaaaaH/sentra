@@ -26,10 +26,6 @@ Route::prefix('v1')->group(function () {
     Route::get('/smart-matching/categories', [SmartMatchingController::class, 'categories']);
     Route::post('/smart-matching', [SmartMatchingController::class, 'match']);
 
-    // Endpoint v1 akan diaktifkan setelah Controller & Model diisi:
-
-    // Route::apiResource('indicators', \App\Http\Controllers\Api\V1\IndicatorController::class);
-    // Route::get('recommendations', [\App\Http\Controllers\Api\V1\RecommendationController::class, 'index']);
 });
 
 Route::prefix('map')->group(function () {

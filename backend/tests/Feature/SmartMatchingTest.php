@@ -55,6 +55,32 @@ class SmartMatchingTest extends TestCase
             $table->unsignedInteger('duration_days');
         });
 
+        Schema::create('desa_geom', function (Blueprint $table): void {
+            $table->string('kode_desa')->primary();
+            $table->text('geom');
+        });
+
+        $pdo = DB::connection()->getPdo();
+        $pdo->sqliteCreateFunction('ST_Centroid', static fn (string $geometry): string => $geometry);
+        $pdo->sqliteCreateFunction('ST_Distance', static function (string $first, string $second): float {
+            preg_match('/^POINT\(([-0-9.]+) ([-0-9.]+)\)$/', $first, $firstPoint);
+            preg_match('/^POINT\(([-0-9.]+) ([-0-9.]+)\)$/', $second, $secondPoint);
+
+            if (count($firstPoint) !== 3 || count($secondPoint) !== 3) {
+                throw new \InvalidArgumentException('SQLite spatial test geometries must be POINT values.');
+            }
+
+            $earthRadiusMeters = 6371008.8;
+            $latitudeDifference = deg2rad((float) $secondPoint[2] - (float) $firstPoint[2]);
+            $longitudeDifference = deg2rad((float) $secondPoint[1] - (float) $firstPoint[1]);
+            $firstLatitude = deg2rad((float) $firstPoint[2]);
+            $secondLatitude = deg2rad((float) $secondPoint[2]);
+            $haversine = sin($latitudeDifference / 2) ** 2
+                + cos($firstLatitude) * cos($secondLatitude) * sin($longitudeDifference / 2) ** 2;
+
+            return 2 * $earthRadiusMeters * asin(min(1, sqrt($haversine)));
+        });
+
         DB::table('kabupaten')->insert([
             'kode_kab' => '3301',
             'nama_kabupaten' => 'Cilacap',
@@ -72,6 +98,10 @@ class SmartMatchingTest extends TestCase
             'unit_type' => 'desa',
             'jarak_sekolah_resmi_km' => 0.5,
             'jarak_faskes_fix_km' => 8,
+        ]);
+        DB::table('desa_geom')->insert([
+            'kode_desa' => '3301012001',
+            'geom' => 'POINT(110 -7)',
         ]);
         DB::table('indeks_urgensi')->insert([
             'kode_desa' => '3301012001',
@@ -106,6 +136,7 @@ class SmartMatchingTest extends TestCase
             ->assertJsonPath('data.0.village_name', 'Desa Tambakreja')
             ->assertJsonPath('data.0.district_name', 'Kedungreja')
             ->assertJsonPath('data.0.match_score', 68)
+            ->assertJsonPath('data.0.distance_km', 0)
             ->assertJsonPath('data.0.feasibility_status', 'Layak dengan Penyesuaian')
             ->assertJsonPath('data.0.recommended_action', fn (string $action): bool => str_contains($action, 'pilot'))
             ->assertJsonMissingPath('data.0.scoring_context');
@@ -161,6 +192,93 @@ class SmartMatchingTest extends TestCase
             'durasi' => 10,
         ])->assertUnprocessable()
             ->assertJsonValidationErrors('bidang');
+    }
+
+    public function test_it_rejects_a_domisili_that_does_not_exist(): void
+    {
+        $this->postJson('/api/v1/smart-matching', [
+            'bidang' => 'kesehatan',
+            'anggaran' => 20000000,
+            'pelaksana' => 4,
+            'durasi' => 14,
+            'domisili' => 'not-a-village',
+        ])->assertUnprocessable()
+            ->assertJsonValidationErrors('domisili');
+    }
+
+    public function test_it_returns_empty_matches_when_the_default_domisili_has_no_geometry(): void
+    {
+        config(['services.gemini.key' => null]);
+        DB::table('desa_geom')->where('kode_desa', '3301012001')->delete();
+
+        $this->postJson('/api/v1/smart-matching', [
+            'bidang' => 'kesehatan',
+            'anggaran' => 20000000,
+            'pelaksana' => 4,
+            'durasi' => 14,
+        ])
+            ->assertOk()
+            ->assertJsonPath('status', 'success')
+            ->assertJsonPath('data', [])
+            ->assertJsonPath('message', 'Desa domisili belum memiliki geometri yang dapat digunakan.');
+    }
+
+    public function test_it_excludes_villages_outside_the_domisili_radius(): void
+    {
+        config(['services.gemini.key' => null]);
+        $this->addHealthVillage('3301012002', 'POINT(110.2 -7)');
+
+        $response = $this->postJson('/api/v1/smart-matching', [
+            'bidang' => 'kesehatan',
+            'anggaran' => 20000000,
+            'pelaksana' => 4,
+            'durasi' => 14,
+            'domisili' => '3301012001',
+            'radius_km' => 10,
+        ]);
+        $response
+            ->assertOk()
+            ->assertJsonCount(1, 'data')
+            ->assertJsonPath('data.0.region_id', '3301012001')
+            ->assertJsonMissing(['region_id' => '3301012002']);
+    }
+
+    public function test_it_returns_distance_and_preserves_the_existing_match_score_for_nearby_villages(): void
+    {
+        config(['services.gemini.key' => null]);
+        $this->addHealthVillage('3301012002', 'POINT(110.05 -7)');
+
+        $this->postJson('/api/v1/smart-matching', [
+            'bidang' => 'kesehatan',
+            'anggaran' => 5000000,
+            'pelaksana' => 2,
+            'durasi' => 14,
+            'domisili' => '3301012001',
+            'radius_km' => 10,
+        ])
+            ->assertOk()
+            ->assertJsonPath('data.0.region_id', '3301012001')
+            ->assertJsonPath('data.0.match_score', 68)
+            ->assertJsonPath('data.1.region_id', '3301012002')
+            ->assertJsonPath('data.1.distance_km', 5.5)
+            ->assertJsonPath('data.1.match_score', 59);
+    }
+
+    public function test_it_uses_the_default_domisili_and_radius_when_omitted(): void
+    {
+        config(['services.gemini.key' => null]);
+        $this->addHealthVillage('3301012002', 'POINT(110.2 -7)');
+
+        $this->postJson('/api/v1/smart-matching', [
+            'bidang' => 'kesehatan',
+            'anggaran' => 20000000,
+            'pelaksana' => 4,
+            'durasi' => 14,
+        ])
+            ->assertOk()
+            ->assertJsonCount(1, 'data')
+            ->assertJsonPath('data.0.region_id', '3301012001')
+            ->assertJsonPath('data.0.distance_km', 0);
     }
 
     public function test_it_only_lists_categories_with_valid_activity_ranges(): void
@@ -340,5 +458,21 @@ class SmartMatchingTest extends TestCase
                 'data.0.recommended_action',
                 'Acuan terdekat: "Program kesehatan ringan". Fokuskan 5 pelaksana selama 7 hari pada penyuluhan kesehatan dan pemeriksaan dasar, dimulai dari kelompok atau lokasi dengan kebutuhan tertinggi.',
             );
+    }
+
+    private function addHealthVillage(string $kodeDesa, string $geometry): void
+    {
+        DB::table('desa')->insert([
+            'kode_desa' => $kodeDesa,
+            'kode_kec' => '330101',
+            'nama_desa' => 'DESA UJI',
+            'unit_type' => 'desa',
+            'iks_2024' => 0.5,
+            'jarak_faskes_fix_km' => 8,
+        ]);
+        DB::table('desa_geom')->insert([
+            'kode_desa' => $kodeDesa,
+            'geom' => $geometry,
+        ]);
     }
 }

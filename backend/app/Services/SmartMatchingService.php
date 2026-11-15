@@ -7,6 +7,7 @@ use App\Models\Desa;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\RequestException;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use JsonException;
@@ -14,6 +15,10 @@ use UnexpectedValueException;
 
 class SmartMatchingService
 {
+    private const DEFAULT_DOMISILI = '3301012001';
+
+    private const DEFAULT_RADIUS_KM = 10;
+
     private const CATEGORY_LABELS = [
         'kesehatan' => 'Kesehatan',
         'pendidikan' => 'Pendidikan',
@@ -46,6 +51,10 @@ class SmartMatchingService
 
     public function processSmartMatching(array $input): array
     {
+        // TODO(FRONTEND): hapus default domisili ini setelah frontend mengirim `domisili`, lalu ubah rule `domisili` di SmartMatchingRequest menjadi required.
+        $domisili = $input['domisili'] ?? self::DEFAULT_DOMISILI;
+        $radiusKm = (float) ($input['radius_km'] ?? self::DEFAULT_RADIUS_KM);
+
         $activities = $this->programActivities($input['bidang']);
         if ($activities->isEmpty()) {
             return [
@@ -72,7 +81,37 @@ class SmartMatchingService
             ];
         }
 
+        if (! DB::table('desa_geom')->where('kode_desa', $domisili)->exists()) {
+            return [
+                'matches' => [],
+                'message' => 'Desa domisili belum memiliki geometri yang dapat digunakan.',
+            ];
+        }
+
         $requirements = $this->closestActivity($durationFeasibleActivities, $input);
+        $isSqliteTest = app()->environment('testing')
+            && DB::connection()->getDriverName() === 'sqlite';
+        $geographyCast = $isSqliteTest ? '' : '::geography';
+        $distanceExpression = "ST_Distance(
+            ST_Centroid(candidate_geom.geom){$geographyCast},
+            ST_Centroid(origin_geom.geom){$geographyCast}
+        ) / 1000.0";
+        $nearbyDistances = collect(DB::select(
+            "SELECT candidate_geom.kode_desa AS region_id, {$distanceExpression} AS distance_km
+            FROM desa_geom AS candidate_geom
+            CROSS JOIN desa_geom AS origin_geom
+            WHERE origin_geom.kode_desa = ?
+                AND {$distanceExpression} <= CAST(? AS DOUBLE PRECISION)",
+            [$domisili, $radiusKm],
+        ))->keyBy('region_id');
+
+        if ($nearbyDistances->isEmpty()) {
+            return [
+                'matches' => [],
+                'message' => sprintf('Tidak ada desa dalam radius %s km dari domisili.', rtrim(rtrim(number_format($radiusKm, 1, ',', '.'), '0'), ',')),
+            ];
+        }
+
         $query = Desa::query()
             ->select([
                 'kode_desa',
@@ -85,6 +124,7 @@ class SmartMatchingService
                 'jarak_sekolah_resmi_km',
                 'jarak_faskes_fix_km',
             ])
+            ->whereIn('kode_desa', $nearbyDistances->keys())
             ->with([
                 'kecamatan:kode_kec,kode_kab,nama_kecamatan',
                 'kecamatan.kabupaten:kode_kab,nama_kabupaten,akses_air_minum_persen,akses_internet_layak_persen',
@@ -112,7 +152,12 @@ class SmartMatchingService
 
         $candidates = $query
             ->get()
-            ->map(fn (Desa $desa): ?array => $this->scoreCandidate($desa, $input, $requirements))
+            ->map(fn (Desa $desa): ?array => $this->scoreCandidate(
+                $desa,
+                $input,
+                $requirements,
+                (float) $nearbyDistances[$desa->kode_desa]->distance_km,
+            ))
             ->filter()
             ->sortByDesc('match_score')
             ->take(5)
@@ -204,8 +249,12 @@ class SmartMatchingService
         return ($budgetDistance * 0.5) + ($peopleDistance * 0.25) + ($durationDistance * 0.25);
     }
 
-    private function scoreCandidate(Desa $desa, array $input, Activity $requirements): ?array
-    {
+    private function scoreCandidate(
+        Desa $desa,
+        array $input,
+        Activity $requirements,
+        float $distanceKm,
+    ): ?array {
         $urgensiBidang = $this->sectorUrgency($desa, $input['bidang']);
 
         if ($urgensiBidang === null) {
@@ -230,6 +279,7 @@ class SmartMatchingService
             'village_name' => ucfirst($desa->unit_type).' '.mb_convert_case($desa->nama_desa, MB_CASE_TITLE, 'UTF-8'),
             'district_name' => $kecamatan?->nama_kecamatan ?? '-',
             'match_score' => $matchScore,
+            'distance_km' => round($distanceKm, 1),
             'urgency_level' => $this->urgencyLabel($urgensiBidang),
             'feasibility_status' => $this->feasibilityLabel($skorKapasitas, $resourcesMeetMinimum),
             'match_reason' => $this->fallbackReason(
@@ -244,6 +294,7 @@ class SmartMatchingService
                 'sector_urgency_score' => (int) round($urgensiBidang),
                 'capacity_score' => (int) round($skorKapasitas),
                 'budget_score' => (int) round($skorAnggaran),
+                'distance_km' => round($distanceKm, 1),
                 'minimum_budget' => $requirements->min_budget,
                 'maximum_budget' => $requirements->max_budget,
                 'activity_title' => $requirements->title,
@@ -519,10 +570,11 @@ class SmartMatchingService
             'match_score' => $candidate['match_score'],
             'urgency_level' => $candidate['urgency_level'],
             'feasibility_status' => $candidate['feasibility_status'],
+            'distance_km' => $candidate['distance_km'],
             'scoring_context' => $candidate['scoring_context'],
         ], $candidates);
 
-        return "Bertindak sebagai analis dampak sosial spasial SENTRA. Hasilkan alasan kecocokan 1-2 kalimat dan aksi yang realistis untuk setiap kandidat. Gunakan hanya data yang diberikan, jangan mengubah urutan/skor, jangan mengarang nilai atau menjanjikan hasil. Jika anggaran di bawah minimum, sarankan pilot atau pengurangan cakupan. Hubungkan kesehatan dengan indeks kesehatan dan jarak fasilitas kesehatan; pendidikan dengan jarak sekolah; internet dengan kesenjangan akses internet; infrastruktur dengan kualitas lahan dan kesenjangan akses air minum; ekonomi hanya dengan indikator ekonomi yang tersedia. Nilai kesenjangan yang lebih tinggi berarti kebutuhan lebih tinggi. Kembalikan JSON sesuai skema.\n"
+        return "Bertindak sebagai analis dampak sosial spasial SENTRA. Hasilkan alasan kecocokan 1-2 kalimat dan aksi yang realistis untuk setiap kandidat. Gunakan hanya data yang diberikan, jangan mengubah urutan/skor, jangan mengarang nilai atau menjanjikan hasil. Sebutkan jarak dari domisili bila relevan. Jika anggaran di bawah minimum, sarankan pilot atau pengurangan cakupan. Hubungkan kesehatan dengan indeks kesehatan dan jarak fasilitas kesehatan; pendidikan dengan jarak sekolah; internet dengan kesenjangan akses internet; infrastruktur dengan kualitas lahan dan kesenjangan akses air minum; ekonomi hanya dengan indikator ekonomi yang tersedia. Nilai kesenjangan yang lebih tinggi berarti kebutuhan lebih tinggi. Kembalikan JSON sesuai skema.\n"
             .'Rencana pengguna: '.json_encode($input, JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR)."\n"
             .'Acuan aktivitas terdekat: '.json_encode([
                 'title' => $requirements->title,

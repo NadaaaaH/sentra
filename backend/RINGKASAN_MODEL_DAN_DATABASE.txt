@@ -101,21 +101,6 @@ DAFTAR MODEL
    Casts      : email_verified_at -> datetime; password -> hashed
    Fitur      : autentikasi Laravel, notifications, factories, Sanctum API tokens.
 
-9. Potential
-   File       : app/Models/Potential.php
-   Status     : file kosong (0 byte); belum mendefinisikan class/model.
-   Tabel      : belum dapat ditentukan dari file model ini.
-
-10. Region
-    File       : app/Models/Region.php
-    Status     : file hanya berisi 2 byte; belum mendefinisikan class/model.
-    Tabel      : belum dapat ditentukan dari file model ini.
-
-11. RegionIndicator
-    File       : app/Models/RegionIndicator.php
-    Status     : file kosong (0 byte); belum mendefinisikan class/model.
-    Tabel      : belum dapat ditentukan dari file model ini.
-
 TABEL APLIKASI DARI MIGRATION
 -----------------------------
 
@@ -176,8 +161,6 @@ TABEL LARAVEL / INFRASTRUKTUR DARI MIGRATION
 CATATAN
 -------
 
-- Model Potential, Region, dan RegionIndicator saat ini kosong/tidak lengkap;
-  ketiganya belum menjadi model Eloquent yang berfungsi.
 - Migration mendefinisikan tabel dan kolom di repository, tetapi tidak
   membuktikan migration sudah dijalankan di database remote.
 - Desa dan IndeksUrgensi menggunakan kode string sebagai relasi antartabel,
