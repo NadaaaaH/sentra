@@ -4,8 +4,8 @@
   --font-sans: "Inter", sans-serif;
   --font-roboto: "Roboto", sans-serif;
   --font-mono: "IBM Plex Mono", monospace;
-  
-  /* OG COLOR PALETTE */
+  --font-sentra: "SoraLocal", sans-serif;
+
   --color-sentra-green: #587042;
   --color-sentra-lightgreen: #A9B494;
   --color-sentra-cream: #FAF7E6;
@@ -23,20 +23,33 @@
   --color-sentra-page: #FDFBF2;
   --color-sentra-hero: #798C65;
   --color-sentra-sage: #D3D8C3;
+
+  --color-sentra-soga: #A8663A;
+  --color-sentra-gold: #D9A441;
+  --color-sentra-teal: #2F7F79;
 }
 
-/* Kursor peta: panah biasa, berubah jadi 4 arah saat digeser */
-.leaflet-container,
-.leaflet-grab {
-  cursor: default !important;
+@font-face {
+  font-family: 'SoraLocal';
+  src: url('./assets/fonts/Sora-Regular.otf') format('opentype');
+  font-weight: 400 800;
+  font-style: normal;
+  font-display: swap;
 }
 
-.leaflet-dragging,
-.leaflet-dragging * {
-  cursor: move !important;
+@layer utilities {
+  .font-sentra {
+    font-family: "SoraLocal", sans-serif;
+  }
 }
 
-/* 0.2 */
+@media (min-width: 768px) {
+  html {
+    font-size: 80%;
+  }
+}
+
+/* ===== Animasi & Komponen Utility ===== */
 @keyframes marquee {
   from { transform: translateX(0); }
   to { transform: translateX(-50%); }
@@ -48,10 +61,6 @@
 
 .marquee:hover .marquee-track {
   animation-play-state: paused;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .marquee-track { animation: none; }
 }
 
 @keyframes ombak {
@@ -67,13 +76,6 @@
   animation: ombak 9s linear infinite;
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .ombak-belakang,
-  .ombak-depan {
-    animation: none;
-  }
-}
-
 @keyframes naik {
   from { opacity: 0; transform: translateY(24px); }
   to { opacity: 1; transform: none; }
@@ -84,10 +86,7 @@
   to { opacity: 1; transform: none; }
 }
 
-.animasi-panel {
-  animation: naik 0.3s ease-out;
-}
-
+.animasi-panel,
 .animasi-profil {
   animation: naik 0.3s ease-out;
 }
@@ -98,9 +97,102 @@
   }
 }
 
-/* Tampilan default lebih ringkas di laptop/desktop (setara zoom browser 80%) */
-@media (min-width: 768px) {
-  html {
-    font-size: 80%;
+@keyframes kontur-putar {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+@keyframes kontur-napas {
+  0%, 100% { transform: scale(1); stroke-opacity: 0.1; }
+  50% { transform: scale(1.07); stroke-opacity: 0.22; }
+}
+
+.kontur-putar {
+  animation: kontur-putar 140s linear infinite;
+}
+
+.kontur-napas {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: kontur-napas 7s ease-in-out infinite;
+}
+
+@keyframes batik-geser {
+  from { transform: translate(0, 0); }
+  to { transform: translate(60px, 60px); }
+}
+
+.batik-geser {
+  animation: batik-geser 60s linear infinite;
+}
+
+@keyframes dalang {
+  0%, 100% {
+    transform: translateX(calc(var(--arah, 1) * -14px))
+      rotate(calc(var(--arah, 1) * -7deg));
   }
+  50% {
+    transform: translateX(calc(var(--arah, 1) * 14px))
+      rotate(calc(var(--arah, 1) * 7deg));
+  }
+}
+
+.dalang-a {
+  transform-origin: 50% 100%;
+  animation: dalang 8s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .marquee-track,
+  .ombak-belakang,
+  .ombak-depan,
+  .kontur-putar,
+  .kontur-napas,
+  .batik-geser,
+  .dalang-a,
+  .awan,
+  .daun {
+    animation: none;
+  }
+}
+
+.kartu-stiker {
+  border: 2px solid #3E512C;
+  border-radius: 1.25rem;
+  box-shadow: 0 5px 0 #3E512C;
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.kartu-stiker:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 8px 0 #3E512C;
+}
+
+@keyframes mini-angkat {
+  from { transform: translateY(0); }
+  to { transform: translateY(-6px); }
+}
+
+.peta-mini-angkat {
+  animation: mini-angkat 0.2s ease-out forwards;
+  filter: drop-shadow(0 8px 5px rgba(20, 30, 10, 0.45));
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .peta-mini-angkat { animation: none; transform: translateY(-6px); }
+}
+
+/* Otomatis mendeteksi teks atau elemen dengan tulisan SENTRA */
+p, span, h1, h2, h3, h4, h5, h6 {
+  /* Jika di dalam teks/elemen tersebut mengandung kata SENTRA */
+  &:has-text("SENTRA"), 
+  &.sentra-title {
+    font-family: "SoraLocal", sans-serif;
+  }
+}
+
+/* Atau cara universal yang mencakup semua elemen pembawa teks SENTRA */
+.font-sentra, 
+[data-brand="sentra"] {
+  font-family: "SoraLocal", sans-serif;
 }

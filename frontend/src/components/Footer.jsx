@@ -1,4 +1,7 @@
 import { Link } from 'react-router'
+import Gelombang from './Gelombang'
+import Gunungan from './Gunungan'
+import BatikLatar from './BatikLatar'
 
 const tautan = [
   { label: 'Beranda', to: '/' },
@@ -10,39 +13,22 @@ const tautan = [
 function Footer() {
   return (
     <footer className="mt-auto">
-      {/* gelombang bergerak: dua lapis dengan kecepatan berbeda */}
-      <div className="relative -mb-px h-10 overflow-hidden md:h-16" aria-hidden="true">
-        <svg
-          className="ombak-belakang absolute bottom-0 left-0 h-full w-[200%]"
-          viewBox="0 0 2880 120"
-          preserveAspectRatio="none"
-        >
-          <g fill="#A9B494">
-            <path d="M0 50 C240 110 480 0 720 50 C960 100 1200 -10 1440 50 L1440 120 L0 120 Z" />
-            <path
-              transform="translate(1440 0)"
-              d="M0 50 C240 110 480 0 720 50 C960 100 1200 -10 1440 50 L1440 120 L0 120 Z"
-            />
-          </g>
-        </svg>
+      <Gelombang
+        className="relative -mb-px h-10 md:h-16"
+        belakang="#A9B494"
+        depan="#587042"
+      />
 
-        <svg
-          className="ombak-depan absolute bottom-0 left-0 h-full w-[200%]"
-          viewBox="0 0 2880 120"
-          preserveAspectRatio="none"
-        >
-          <g fill="#587042">
-            <path d="M0 80 C240 40 480 120 720 80 C960 40 1200 120 1440 80 L1440 120 L0 120 Z" />
-            <path
-              transform="translate(1440 0)"
-              d="M0 80 C240 40 480 120 720 80 C960 40 1200 120 1440 80 L1440 120 L0 120 Z"
-            />
-          </g>
-        </svg>
-      </div>
+      <div className="relative overflow-hidden bg-sentra-green text-sentra-cream">
+        <BatikLatar opacity={0.06} />
 
-      <div className="bg-sentra-green text-sentra-cream">
-        <div className="mx-auto grid max-w-7xl gap-10 px-6 py-12 md:grid-cols-3 md:px-12">
+        <Gunungan className="absolute -bottom-8 left-6 h-52 opacity-25 md:left-20 md:h-72" />
+        <Gunungan
+        arah={-1}
+        className="absolute -bottom-8 right-6 h-52 opacity-25 md:right-20 md:h-72"
+        />
+
+        <div className="relative z-10 mx-auto grid max-w-7xl gap-10 px-6 py-12 md:grid-cols-3 md:px-12">
           <div>
             <p className="text-3xl font-bold">SENTRA</p>
             <p className="mt-1 text-sm">Spatial Needs & Response Analytics</p>
@@ -78,7 +64,7 @@ function Footer() {
           </div>
         </div>
 
-        <div className="border-t border-white/15">
+        <div className="relative z-10 border-t border-white/15">
           <div className="mx-auto flex max-w-7xl flex-col gap-2 px-6 py-5 font-mono text-xs tracking-wider text-sentra-cream/70 md:flex-row md:justify-between md:px-12">
             <p>© 2026 SENTRA · Spatial Needs & Response Analytics</p>
             <p>Developed for academic project</p>

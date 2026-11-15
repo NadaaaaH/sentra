@@ -1,16 +1,10 @@
 import { ChevronDown } from 'lucide-react'
+import { bidangProgram } from '../../data/contohHasil'
 
 const inputClass =
   'mt-1 w-full rounded-md border border-sentra-stroke bg-white px-3 py-2 text-sm outline-none placeholder:text-gray-400 focus:border-sentra-green'
 
-function FormProgram({
-  form,
-  bidangProgram,
-  kategoriMemuat,
-  kategoriError,
-  onChange,
-  onSubmit,
-}) {
+function FormProgram({ form, onChange, onSubmit }) {
   return (
     <form
       onSubmit={onSubmit}
@@ -31,26 +25,16 @@ function FormProgram({
             }`}
           >
             <option value="" disabled>
-              {kategoriMemuat ? 'Memuat bidang program...' : 'Pilih bidang program'}
+              Pilih bidang program
             </option>
-            {bidangProgram.map((bidang) => (
-              <option key={bidang.value} value={bidang.value} className="text-black">
-                {bidang.label}
+            {bidangProgram.map((b) => (
+              <option key={b} value={b} className="text-black">
+                {b}
               </option>
             ))}
           </select>
           <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2" />
         </div>
-        {kategoriError && (
-          <span role="alert" className="mt-1 block text-xs text-red-700">
-            Gagal memuat pilihan bidang: {kategoriError}
-          </span>
-        )}
-        {!kategoriMemuat && !kategoriError && bidangProgram.length === 0 && (
-          <span role="status" className="mt-1 block text-xs text-gray-600">
-            Belum ada aktivitas dengan acuan sumber daya yang valid.
-          </span>
-        )}
       </label>
 
       <label className="mt-4 block text-sm">
@@ -97,8 +81,7 @@ function FormProgram({
 
       <button
         type="submit"
-        disabled={kategoriMemuat || Boolean(kategoriError) || bidangProgram.length === 0}
-        className="mt-6 w-full cursor-pointer rounded-md bg-sentra-green py-2.5 font-semibold text-white transition hover:-translate-y-0.5 hover:bg-sentra-darkergreen hover:shadow-lg disabled:cursor-not-allowed disabled:opacity-50"
+        className="mt-6 w-full cursor-pointer rounded-md bg-sentra-green py-2.5 font-semibold text-white transition hover:-translate-y-0.5 hover:bg-sentra-darkergreen hover:shadow-lg"
       >
         Temukan wilayah
       </button>
