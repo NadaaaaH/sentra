@@ -1,5 +1,11 @@
 # React + Vite
 
+## API configuration
+
+Set `VITE_API_BASE_URL` to the backend origin (for example, `http://127.0.0.1:8000`).
+Copy `.env.example` to `.env.local` and adjust the value for your environment.
+Restart the Vite development server after changing environment variables.
+
 This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
 
 Currently, two official plugins are available:

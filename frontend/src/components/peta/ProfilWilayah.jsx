@@ -1,5 +1,5 @@
 import {
-  X, BookOpen, Activity, MapPin, Users, Ruler, Wallet, Clock, Lightbulb, Target,
+  X, BookOpen, Activity, MapPin, Users, Ruler, Lightbulb, CircleAlert, FileText,
 } from 'lucide-react'
 
 const WARNA_KELAS = {
@@ -34,6 +34,27 @@ function kategoriUrgensi(skor) {
 
 const warnaNilai = (n) => kategoriUrgensi(n).hex
 const adaIsi = (arr) => Array.isArray(arr) && arr.length > 0
+const LABEL_BIDANG = {
+  kesehatan: 'Kesehatan',
+  pendidikan: 'Pendidikan',
+  internet: 'Akses Internet',
+  infrastruktur: 'Infrastruktur',
+  ekonomi: 'Ekonomi',
+}
+
+function formatAnggaran(nilai) {
+  return nilai == null
+    ? 'Belum tersedia'
+    : `Rp${Number(nilai).toLocaleString('id-ID')}`
+}
+
+function formatJarak(km) {
+  if (km === null || km === undefined || km === '') return 'Belum tersedia'
+  const jarak = Number(km)
+  return Number.isFinite(jarak)
+    ? `${jarak.toLocaleString('id-ID', { maximumFractionDigits: 2 })} km`
+    : 'Belum tersedia'
+}
 
 function Gauge({ persen, warna, children }) {
   const r = 38
@@ -74,22 +95,42 @@ function Kosong({ children }) {
   )
 }
 
-function ProfilWilayah({ wilayah, fasilitas, onClose }) {
+function ProfilWilayah({
+  wilayah,
+  fasilitas,
+  detailDesa,
+  detailDesaLoading,
+  recommendations,
+  recommendationsLoading,
+  detailKabupaten,
+  detailKabupatenLoading,
+  detailKabupatenError,
+  onClose,
+}) {
   const isDesa = wilayah?.jenis === 'Desa' || wilayah?.kelas != null
+  const profilTampil = isDesa && detailDesa
+    ? {
+        ...wilayah,
+        ...detailDesa,
+        kabupaten: wilayah?.kabupaten ?? detailDesa.kabupaten,
+      }
+    : !isDesa && detailKabupaten
+      ? { ...wilayah, ...detailKabupaten, kabupaten: 'Provinsi Jawa Tengah' }
+    : wilayah
 
-  const skor = Number(wilayah?.indeksUrgensi) || 0
+  const skor = Number(profilTampil?.indeksUrgensi) || 0
   const kelas = Number(wilayah?.kelas) || 0
   const modeKelas = isDesa && skor === 0 && kelas > 0
 
   const kategori = kategoriUrgensi(skor)
   const warnaGauge = modeKelas ? WARNA_KELAS[kelas] : kategori.hex
   const persen = modeKelas ? (kelas / 5) * 100 : skor
-  const labelUrgensi = modeKelas ? wilayah?.labelUrgensi || NAMA_KELAS[kelas] : kategori.nama
+  const labelUrgensi = modeKelas ? profilTampil?.labelUrgensi || NAMA_KELAS[kelas] : kategori.nama
 
-  const namaKab = NAMA_KAB[String(wilayah?.kabupaten)] ?? wilayah?.kabupaten
+  const namaKab = NAMA_KAB[String(profilTampil?.kabupaten)] ?? profilTampil?.kabupaten
 
-  const saran = adaIsi(wilayah?.saranProgram)
-    ? [...wilayah.saranProgram].sort((a, b) => b.skor - a.skor).slice(0, 10)
+  const indikatorPerhatian = Array.isArray(detailDesa?.indikatorPerhatian)
+    ? detailDesa.indikatorPerhatian
     : []
 
   return (
@@ -113,7 +154,7 @@ function ProfilWilayah({ wilayah, fasilitas, onClose }) {
         </div>
 
         <h2 className="relative mt-4 text-3xl font-bold leading-tight">
-          {wilayah?.jenis} {wilayah?.nama}
+          {profilTampil?.jenis} {profilTampil?.nama}
         </h2>
         {namaKab && (
           <p className="relative mt-1 flex items-center gap-1.5 text-sm text-sentra-cream/80">
@@ -127,7 +168,7 @@ function ProfilWilayah({ wilayah, fasilitas, onClose }) {
               <Users size={12} /> Penduduk
             </p>
             <p className="mt-0.5 text-lg font-bold">
-              {wilayah?.penduduk ? wilayah.penduduk.toLocaleString('id-ID') : '-'}
+              {profilTampil?.penduduk ? profilTampil.penduduk.toLocaleString('id-ID') : '-'}
               <span className="ml-1 text-xs font-normal text-sentra-cream/70">jiwa</span>
             </p>
           </div>
@@ -136,7 +177,7 @@ function ProfilWilayah({ wilayah, fasilitas, onClose }) {
               <Ruler size={12} /> Luas
             </p>
             <p className="mt-0.5 text-lg font-bold">
-              {wilayah?.luas || '-'}
+              {profilTampil?.luas || '-'}
               <span className="ml-1 text-xs font-normal text-sentra-cream/70">ha</span>
             </p>
           </div>
@@ -238,15 +279,74 @@ function ProfilWilayah({ wilayah, fasilitas, onClose }) {
             ) : (
               <Kosong>Data fasilitas belum tersedia.</Kosong>
             )}
+
+            <div className="mt-3 rounded-2xl border border-gray-200 bg-white p-3 shadow-sm">
+              <p className="mb-2 text-xs font-semibold text-gray-700">Jarak fasilitas terdekat</p>
+              <div className="grid grid-cols-2 gap-3">
+                <div className="rounded-xl bg-blue-50 px-3 py-2">
+                  <p className="text-[10px] uppercase tracking-wide text-gray-500">Pendidikan</p>
+                  <div className="mt-0.5 flex flex-wrap items-center gap-x-1.5 gap-y-0.5">
+                    <p className="text-sm font-bold text-gray-800">
+                      {detailDesaLoading ? 'Memuat...' : formatJarak(detailDesa?.jarakSekolahKm)}
+                    </p>
+                    {!detailDesaLoading && indikatorPerhatian.includes('pendidikan') && (
+                      <span
+                        className="inline-flex items-center gap-0.5 text-[10px] font-semibold text-red-600"
+                        aria-label="Perlu perhatian: jarak sekolah lebih dari 1 km"
+                        title="Jarak sekolah lebih dari 1 km"
+                      >
+                        <CircleAlert size={13} aria-hidden="true" />
+                        Perlu perhatian!
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-[10px] text-gray-500">sekolah terdekat</p>
+                </div>
+                <div className="rounded-xl bg-red-50 px-3 py-2">
+                  <p className="text-[10px] uppercase tracking-wide text-gray-500">Kesehatan</p>
+                  <div className="mt-0.5 flex flex-wrap items-center gap-x-1.5 gap-y-0.5">
+                    <p className="text-sm font-bold text-gray-800">
+                      {detailDesaLoading ? 'Memuat...' : formatJarak(detailDesa?.jarakFaskesKm)}
+                    </p>
+                    {!detailDesaLoading && indikatorPerhatian.includes('kesehatan') && (
+                      <span
+                        className="inline-flex items-center gap-0.5 text-[10px] font-semibold text-red-600"
+                        aria-label="Perlu perhatian: jarak fasilitas kesehatan lebih dari 3 km"
+                        title="Jarak fasilitas kesehatan lebih dari 3 km"
+                      >
+                        <CircleAlert size={13} aria-hidden="true" />
+                        Perlu perhatian!
+                      </span>
+                    )}
+                  </div>
+                  <p className="truncate text-[10px] text-gray-500">
+                    {detailDesa?.faskesTerdekat
+                      ? `${detailDesa.faskesTerdekat}${detailDesa.tipeFaskesTerdekat ? ` · ${detailDesa.tipeFaskesTerdekat}` : ''}`
+                      : 'faskes terdekat'}
+                  </p>
+                </div>
+              </div>
+            </div>
           </section>
         )}
 
         {/* KESENJANGAN */}
         <section>
-          <Judul ikon={Activity}>Kesenjangan Indikator</Judul>
-          {adaIsi(wilayah?.kesenjangan) ? (
+          <Judul ikon={Activity}>
+            {isDesa ? 'Kesenjangan Indikator' : 'Rata-rata Kesenjangan Indikator'}
+          </Judul>
+          {!isDesa && detailKabupaten && (
+            <p className="mb-2 text-xs text-gray-500">
+              Desa urgensi Sangat Urgent (merah):{' '}
+              <span className="font-semibold text-red-600">
+                {detailKabupaten.jumlahDesaUrgent} dari {detailKabupaten.jumlahDesa}
+              </span>{' '}
+              desa/kelurahan.
+            </p>
+          )}
+          {adaIsi(profilTampil?.kesenjangan) ? (
             <div className="space-y-3 rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
-              {wilayah.kesenjangan.map((item) => (
+              {profilTampil.kesenjangan.map((item) => (
                 <div key={item.label}>
                   <div className="flex items-center justify-between text-xs">
                     <span className="font-medium text-gray-700">{item.label}</span>
@@ -273,92 +373,100 @@ function ProfilWilayah({ wilayah, fasilitas, onClose }) {
             <Kosong>
               {isDesa
                 ? 'Data kesenjangan indikator tingkat desa belum tersedia.'
-                : 'Data kesenjangan indikator belum tersedia.'}
+                : detailKabupatenLoading
+                  ? 'Menghitung rata-rata indikator kabupaten...'
+                  : detailKabupatenError ?? 'Data indikator kabupaten belum tersedia.'}
             </Kosong>
           )}
         </section>
 
-        {/* POTENSI */}
-        <section>
-          <Judul ikon={Lightbulb}>Potensi Wilayah</Judul>
-          {adaIsi(wilayah?.potensi) ? (
-            <ul className="space-y-2">
-              {wilayah.potensi.map((teks, i) => (
-                <li
-                  key={teks}
-                  className="flex items-center gap-3 rounded-xl border border-gray-200 bg-white px-3 py-2.5 text-sm shadow-sm"
-                >
-                  <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-sentra-yellow/60 text-xs font-bold">
-                    {String(i + 1).padStart(2, '0')}
-                  </span>
-                  {teks}
-                </li>
-              ))}
-            </ul>
-          ) : (
-            <Kosong>
-              {isDesa
-                ? 'Data potensi tingkat desa belum tersedia.'
-                : 'Data potensi wilayah belum tersedia.'}
-            </Kosong>
-          )}
-        </section>
-
-        {/* SARAN PROGRAM */}
-        {saran.length > 0 && (
+        {isDesa && (
           <section>
-            <Judul ikon={Target}>Saran Program</Judul>
-            <div className="space-y-3">
-              {saran.map((item) => (
-                <div
-                  key={item.judul}
-                  className="rounded-2xl border border-gray-200 bg-white p-3.5 shadow-sm"
-                >
-                  <div className="flex items-start justify-between gap-2">
-                    <div>
-                      <p className="text-sm font-semibold leading-tight">{item.judul}</p>
-                      <span className="mt-1 inline-block rounded-full bg-sentra-green/10 px-2 py-0.5 text-[10px] font-medium text-sentra-green">
-                        {item.bidang}
-                      </span>
-                    </div>
-                    <span className="shrink-0 rounded-full bg-emerald-100 px-2.5 py-0.5 text-[11px] font-bold text-emerald-700">
-                      {item.skor}% cocok
+            <Judul ikon={Lightbulb}>Potensi Wilayah</Judul>
+            {adaIsi(profilTampil?.potensi) ? (
+              <ul className="space-y-2">
+                {profilTampil.potensi.map((teks, i) => (
+                  <li
+                    key={teks}
+                    className="flex items-center gap-3 rounded-xl border border-gray-200 bg-white px-3 py-2.5 text-sm shadow-sm"
+                  >
+                    <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-sentra-yellow/60 text-xs font-bold">
+                      {String(i + 1).padStart(2, '0')}
                     </span>
-                  </div>
-
-                  <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-gray-100">
-                    <div
-                      className="h-full rounded-full bg-emerald-500"
-                      style={{ width: `${item.skor}%` }}
-                    />
-                  </div>
-
-                  <p className="mt-2 text-[12px] leading-snug text-gray-600">{item.deskripsi}</p>
-
-                  <div className="mt-3 grid grid-cols-3 gap-2 text-center">
-                    <div className="rounded-lg bg-gray-50 py-1.5">
-                      <Wallet size={13} className="mx-auto text-gray-400" />
-                      <p className="mt-0.5 text-[11px] font-bold">Rp {item.biaya} jt</p>
-                    </div>
-                    <div className="rounded-lg bg-gray-50 py-1.5">
-                      <Users size={13} className="mx-auto text-gray-400" />
-                      <p className="mt-0.5 text-[11px] font-bold">{item.relawan} relawan</p>
-                    </div>
-                    <div className="rounded-lg bg-gray-50 py-1.5">
-                      <Clock size={13} className="mx-auto text-gray-400" />
-                      <p className="mt-0.5 text-[11px] font-bold">{item.hari} hari</p>
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
+                    {teks}
+                  </li>
+                ))}
+              </ul>
+            ) : detailDesaLoading ? (
+              <Kosong>Memuat potensi wilayah...</Kosong>
+            ) : (
+              <Kosong>Potensi wilayah belum tersedia.</Kosong>
+            )}
           </section>
         )}
 
-        {!isDesa && (
-          <p className="text-center text-[10px] text-gray-400">
-            Data kesenjangan, potensi, dan saran program bersifat demonstratif (sementara).
-          </p>
+        {isDesa && (
+          <section>
+            <Judul ikon={Lightbulb}>Rekomendasi Kegiatan</Judul>
+            {recommendationsLoading ? (
+              <div className="space-y-2" aria-label="Memuat rekomendasi kegiatan">
+                {[0, 1, 2].map((item) => (
+                  <div
+                    key={item}
+                    className="h-24 animate-pulse rounded-xl border border-gray-200 bg-white/70"
+                  />
+                ))}
+              </div>
+            ) : adaIsi(recommendations) ? (
+              <div className="space-y-2">
+                {recommendations.map((item, index) => (
+                  <article
+                    key={`${item.source}-${item.category}-${item.title}-${index}`}
+                    className="rounded-xl border border-gray-200 bg-white px-3 py-3 text-sm text-gray-700 shadow-sm"
+                  >
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="rounded-full bg-sentra-green/10 px-2 py-0.5 text-xs font-semibold text-sentra-green">
+                        {LABEL_BIDANG[item.category] ?? item.category}
+                      </span>
+                      {item.source === 'ai' && (
+                        <span className="rounded-full bg-sentra-yellow/40 px-2 py-0.5 text-xs font-semibold text-gray-700">
+                          Saran AI
+                        </span>
+                      )}
+                    </div>
+                    <h4 className="mt-2 font-semibold text-gray-900">{item.title}</h4>
+                    {item.description && (
+                      <p className="mt-1 text-xs text-gray-600">{item.description}</p>
+                    )}
+                    <p className="mt-1 text-xs text-gray-600">{item.explanation}</p>
+                    <p className="mt-2 text-xs text-gray-600">
+                      Anggaran: {formatAnggaran(item.budget_min)}–{formatAnggaran(item.budget_max)}
+                      {' · '}Pelaksana: {item.people ?? 'Belum tersedia'}
+                      {' · '}Durasi: {item.duration ?? 'Belum tersedia'}
+                      {item.duration != null ? ' hari' : ''}
+                    </p>
+                    {(item.kabupaten || item.desa) && (
+                      <p className="mt-1 text-xs text-gray-500">
+                        {[item.desa, item.kabupaten].filter(Boolean).join(', ')}
+                      </p>
+                    )}
+                    {item.file_url && (
+                      <a
+                        href={item.file_url}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="mt-2 inline-flex items-center gap-1 text-xs font-semibold text-sentra-green hover:underline"
+                      >
+                        <FileText size={14} /> Lihat dokumen
+                      </a>
+                    )}
+                  </article>
+                ))}
+              </div>
+            ) : (
+              <Kosong>Rekomendasi kegiatan belum tersedia.</Kosong>
+            )}
+          </section>
         )}
       </div>
     </aside>

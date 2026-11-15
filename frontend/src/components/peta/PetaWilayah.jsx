@@ -31,6 +31,8 @@ function buangLubangKecil(geojson, batas = 0.0002) {
 }
 
 const JATENG = buangLubangKecil(jateng)
+const STYLE_HOVER = { color: '#111827', weight: 2, fillOpacity: 0.95 }
+const STYLE_TERPILIH = { color: '#111827', weight: 3, fillOpacity: 1 }
 
 // Semua file desa yang ada di folder data/desa (dicek dulu sebelum di-load)
 const FILE_DESA = import.meta.glob('../../data/desa/desa_*.json')
@@ -178,11 +180,15 @@ function LegendaUrgensi() {
   )
 }
 
-function PetaWilayah({ terpilihId, indikator, onPilih, sinyal, onKembali }) {
+function PetaWilayah({ terpilihId, onPilih, sinyal, onKembali, initialDesaId }) {
   const map = useMap()
+  const initialKodeKab = initialDesaId ? bersihkanKode(initialDesaId).slice(0, 4) : null
+  const initialKabupaten = initialKodeKab
+    ? JATENG.features.find((feature) => getKodeBPS(feature) === initialKodeKab)
+    : null
   const [hover, setHover] = useState(null)
-  const [kabupatenAktif, setKabupatenAktif] = useState(null)
-  const [namaKabAktif, setNamaKabAktif] = useState(null)
+  const [kabupatenAktif, setKabupatenAktif] = useState(initialKabupaten ? initialKodeKab : null)
+  const [namaKabAktif, setNamaKabAktif] = useState(initialKabupaten?.properties.label ?? null)
   const [desaData, setDesaData] = useState(null)
   const [memuatDesa, setMemuatDesa] = useState(false)
   const [tidakAdaData, setTidakAdaData] = useState(null)
@@ -190,20 +196,26 @@ function PetaWilayah({ terpilihId, indikator, onPilih, sinyal, onKembali }) {
   const [jumlahDesaMuat, setJumlahDesaMuat] = useState({})
 
   const layerTerpilihRef = useRef(null)
+  const desaGeoJsonRef = useRef(null)
+  const initialDesaLoadRef = useRef(false)
+  const initialDesaFocusRef = useRef(false)
+  const initialTerpilihIdRef = useRef(terpilihId)
 
   const onPilihRef = useRef(onPilih)
   useEffect(() => {
     onPilihRef.current = onPilih
   })
 
-  const tandaiZoom = () =>
-    map.getContainer().classList.toggle('zoom-dekat', map.getZoom() >= 8.5)
+  const tandaiZoom = useCallback(
+    () => map.getContainer().classList.toggle('zoom-dekat', map.getZoom() >= 8.5),
+    [map],
+  )
   useMapEvents({ zoomend: tandaiZoom })
 
   useEffect(() => {
     tandaiZoom()
-    if (terpilihId) {
-      const fitur = JATENG.features.find((f) => f.properties.id === terpilihId)
+    if (initialTerpilihIdRef.current) {
+      const fitur = JATENG.features.find((f) => f.properties.id === initialTerpilihIdRef.current)
       if (fitur) {
         map.fitBounds(L.geoJSON(fitur).getBounds(), { ...ruangSidebar(), maxZoom: 9, animate: false })
       }
@@ -213,19 +225,12 @@ function PetaWilayah({ terpilihId, indikator, onPilih, sinyal, onKembali }) {
       map.flyTo([-7.2, 110.2], 7.5, { duration: 2.4 })
     }, 500)
     return () => clearTimeout(t)
-  }, [])
+  }, [map, tandaiZoom])
 
   // Tandai mode desa di container (opsional untuk CSS: sembunyikan label kabupaten)
   useEffect(() => {
     map.getContainer().classList.toggle('mode-desa', Boolean(kabupatenAktif))
   }, [kabupatenAktif, map])
-
-  // Sinyal dari parent (tombol X di panel profil)
-  useEffect(() => {
-    if (!sinyal || sinyal.n === 0) return
-    if (sinyal.jenis === 'reset') resetDesa()
-    else if (sinyal.jenis === 'lepasDesa') lepasPilihanDesa()
-  }, [sinyal?.n])
 
   // GAYA KABUPATEN
   const gaya = useCallback(
@@ -256,13 +261,15 @@ function PetaWilayah({ terpilihId, indikator, onPilih, sinyal, onKembali }) {
         fillOpacity: 0.9,
       }
     },
-    [kabupatenAktif, indikator, desaData],
+    [kabupatenAktif, desaData],
   )
 
-  const ambilDesa = async (kodeKab) => {
-    setDesaData(null)
-    setTidakAdaData(null)
-    layerTerpilihRef.current = null
+  const ambilDesa = useCallback(async (kodeKab, preserveCurrent = false) => {
+    if (!preserveCurrent) {
+      setDesaData(null)
+      setTidakAdaData(null)
+      layerTerpilihRef.current = null
+    }
 
     const loader = FILE_DESA[`../../data/desa/desa_${kodeKab}.json`]
     if (!loader) {
@@ -286,7 +293,28 @@ function PetaWilayah({ terpilihId, indikator, onPilih, sinyal, onKembali }) {
     } finally {
       setMemuatDesa(false)
     }
-  }
+  }, [])
+
+  useEffect(() => {
+    if (!initialDesaId || !initialKabupaten || initialDesaLoadRef.current) return
+    initialDesaLoadRef.current = true
+    ambilDesa(initialKodeKab, true)
+  }, [ambilDesa, initialDesaId, initialKabupaten, initialKodeKab])
+
+  useEffect(() => {
+    if (!initialDesaId || !desaData || initialDesaFocusRef.current) return
+
+    const targetLayer = desaGeoJsonRef.current
+      ?.getLayers()
+      .find((layer) => bersihkanKode(layer.feature?.properties?.kode_desa) === initialDesaId)
+    if (!targetLayer) return
+
+    initialDesaFocusRef.current = true
+    layerTerpilihRef.current = targetLayer
+    targetLayer.setStyle(STYLE_TERPILIH)
+    targetLayer.bringToFront()
+    map.flyTo(targetLayer.getBounds().getCenter(), 14, { duration: 1.2 })
+  }, [desaData, initialDesaId, map])
 
   const eachFeature = (feature, layer) => {
     layer.bindTooltip(feature.properties.label.replace('Kabupaten ', ''), {
@@ -302,7 +330,7 @@ function PetaWilayah({ terpilihId, indikator, onPilih, sinyal, onKembali }) {
         const kodeBPS = getKodeBPS(feature)
         map.flyToBounds(layer.getBounds(), { ...ruangSidebar(), maxZoom: 11, duration: 1.2 })
 
-        onPilihRef.current(feature, 'kabupaten')
+        onPilihRef.current(feature, 'kabupaten', null, kodeBPS)
 
         if (kodeBPS) {
           setKabupatenAktif(kodeBPS)
@@ -321,14 +349,11 @@ function PetaWilayah({ terpilihId, indikator, onPilih, sinyal, onKembali }) {
     fillColor: WARNA_URGENSI[feature.properties.kelas || 0],
     fillOpacity: 0.85,
   })
-  const STYLE_HOVER = { color: '#111827', weight: 2, fillOpacity: 0.95 }
-  const STYLE_TERPILIH = { color: '#111827', weight: 3, fillOpacity: 1 }
-
-  const lepasPilihanDesa = () => {
-    const l = layerTerpilihRef.current
-    if (l && l.feature) l.setStyle(gayaDesa(l.feature))
+  const lepasPilihanDesa = useCallback(() => {
+    const layer = layerTerpilihRef.current
+    if (layer?.feature) layer.setStyle(gayaDesa(layer.feature))
     layerTerpilihRef.current = null
-  }
+  }, [])
 
   const eachFeatureDesa = (feature, layer) => {
     layer.bindTooltip(feature.properties.nama_desa, { direction: 'top', sticky: true })
@@ -352,7 +377,7 @@ function PetaWilayah({ terpilihId, indikator, onPilih, sinyal, onKembali }) {
     })
   }
 
-  const resetDesa = () => {
+  const resetDesa = useCallback(() => {
     layerTerpilihRef.current = null
     setDesaData(null)
     setTidakAdaData(null)
@@ -361,7 +386,16 @@ function PetaWilayah({ terpilihId, indikator, onPilih, sinyal, onKembali }) {
     setNamaKabAktif(null)
     setHover(null)
     map.flyTo([-7.2, 110.2], 7.5, { duration: 1 })
-  }
+  }, [map])
+
+  // Sinyal dari parent (tombol X di panel profil)
+  useEffect(() => {
+    if (!sinyal || sinyal.n === 0) return
+    // The parent signal must also reset the Leaflet layer state owned here.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    if (sinyal.jenis === 'reset') resetDesa()
+    else if (sinyal.jenis === 'lepasDesa') lepasPilihanDesa()
+  }, [lepasPilihanDesa, resetDesa, sinyal])
 
   const terpilih = JATENG.features.find((f) => f.properties.id === terpilihId)
 
@@ -404,6 +438,7 @@ function PetaWilayah({ terpilihId, indikator, onPilih, sinyal, onKembali }) {
         <Pane name="desa" style={{ zIndex: 500 }}>
           <GeoJSON
             key={`desa-${kabupatenAktif}-${versiDesa}-${namaKabAktif}`}
+            ref={desaGeoJsonRef}
             data={desaData}
             style={gayaDesa}
             onEachFeature={eachFeatureDesa}

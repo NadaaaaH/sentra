@@ -2,6 +2,7 @@
 
 namespace App\Http\Resources\V1;
 
+use App\Services\DesaPotentialService;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 
@@ -10,6 +11,10 @@ class DesaDetailResource extends JsonResource
     public function toArray(Request $request): array
     {
         $kabupaten = $this->kecamatan?->kabupaten;
+        $potensi = app(DesaPotentialService::class)->generate(
+            $this->resource,
+            $kabupaten?->akses_internet_layak_persen,
+        );
         $kesenjangan = [];
 
         foreach ([
@@ -62,9 +67,13 @@ class DesaDetailResource extends JsonResource
             'jarakSekolahKm' => $this->jarak_sekolah_resmi_km,
             'jarakFaskesKm' => $this->jarak_faskes_fix_km,
             'faskesTerdekat' => $this->faskes_terdekat,
+            'tipeFaskesTerdekat' => $this->tipe_faskes_terdekat,
             'indikatorPerhatian' => $indikatorPerhatian,
             'kesenjangan' => $kesenjangan,
+            'potensi' => $potensi,
             'rekomendasi' => $this->indeksUrgensi?->rekomendasi,
+            'recommendations' => $this->recommendations ?? [],
+            'ai_available' => (bool) ($this->ai_available ?? false),
         ];
     }
 }

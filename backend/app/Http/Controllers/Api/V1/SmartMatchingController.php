@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api\V1;
 
 use App\Http\Controllers\Controller;
+use Illuminate\Http\Request;
 use App\Http\Requests\Api\V1\SmartMatchingRequest;
 use App\Services\SmartMatchingService;
 use Illuminate\Http\JsonResponse;
@@ -20,6 +21,19 @@ class SmartMatchingController extends Controller
         ]);
     }
 
+    public function locations(Request $request): JsonResponse
+    {
+        $validated = $request->validate([
+            'q' => ['required', 'string', 'min:2', 'max:100'],
+        ]);
+
+        return response()->json([
+            'status' => 'success',
+            'message' => 'Pilihan lokasi berhasil dimuat.',
+            'data' => $this->smartMatchingService->searchLocations($validated['q']),
+        ]);
+    }
+
     public function match(SmartMatchingRequest $request): JsonResponse
     {
         $result = $this->smartMatchingService->processSmartMatching($request->validated());
@@ -28,6 +42,10 @@ class SmartMatchingController extends Controller
             'status' => 'success',
             'message' => $result['message'],
             'data' => $result['matches'],
+            'meta' => [
+                'total' => $result['total'],
+                'has_more' => $result['has_more'],
+            ],
         ]);
     }
 }

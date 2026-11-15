@@ -23,7 +23,10 @@ Route::prefix('v1')->group(function () {
     // Route::apiResource('regions', \App\Http\Controllers\Api\V1\RegionController::class);
     // Endpoint ketika peta/titik desa diklik oleh Frontend
     Route::get('/regions/desa/{kode_desa}', [RegionController::class, 'showByDesa']);
+    Route::get('/regions/desa/{kode_desa}/recommendations', [RegionController::class, 'showRecommendations']);
+    Route::get('/regions/kabupaten/{kode_kab}', [RegionController::class, 'showByKabupaten']);
     Route::get('/smart-matching/categories', [SmartMatchingController::class, 'categories']);
+    Route::get('/smart-matching/locations', [SmartMatchingController::class, 'locations']);
     Route::post('/smart-matching', [SmartMatchingController::class, 'match']);
 
 });

@@ -1,8 +1,9 @@
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useRef, useEffect } from 'react'
 import { useLocation } from 'react-router'
 import { MapContainer } from 'react-leaflet'
 import 'leaflet/dist/leaflet.css'
 import '../components/peta/peta.css'
+import { apiFetch } from '../lib/api'
 import SearchBar from '../components/peta/SearchBar'
 import LayerButton from '../components/peta/LayerButton'
 import LayerPanel from '../components/peta/LayerPanel'
@@ -10,7 +11,6 @@ import ZoomButtons from '../components/peta/ZoomButtons'
 import ProfilWilayah from '../components/peta/ProfilWilayah'
 import PetaWilayah from '../components/peta/PetaWilayah'
 import jateng from '../data/jateng.json'
-import { buatProfil } from '../data/profilKabupaten'
 import { cariWilayahById } from '../data/contohWilayah'
 
 const BATAS_INDONESIA = [ [-16, 85], [12, 150] ]
@@ -28,24 +28,122 @@ const LATAR_LAUT = {
     'radial-gradient(rgba(88,112,66,0.14) 1px, transparent 1.6px) 0 0 / 24px 24px, radial-gradient(circle at 30% 20%, #F5FAFC, #D9E6EB)',
 }
 
+function detailDesaUrl(kodeDesa, context) {
+  const params = new URLSearchParams()
+  params.set('include_recommendations', 'false')
+  if (context?.bidang) {
+    params.set('bidang', context.bidang)
+    params.set('budget', context.budget)
+    params.set('people', context.people)
+    params.set('duration', context.duration)
+  }
+  const query = params.toString()
+  return `/api/v1/regions/desa/${kodeDesa}${query ? `?${query}` : ''}`
+}
+
+function recommendationsUrl(kodeDesa, context) {
+  const params = new URLSearchParams()
+  if (context?.bidang) {
+    params.set('bidang', context.bidang)
+    params.set('budget', context.budget)
+    params.set('people', context.people)
+    params.set('duration', context.duration)
+  }
+  const query = params.toString()
+  return `/api/v1/regions/desa/${kodeDesa}/recommendations${query ? `?${query}` : ''}`
+}
+
 function JelajahiPeta() {
   const { state } = useLocation()
+  const recommendationContext = state?.recommendationContext ?? null
 
   const desaAwal = state?.wilayahId ? cariWilayahById(state.wilayahId) : null
-  const fiturAwal = desaAwal
-    ? jateng.features.find((f) => f.properties.label === desaAwal.kabupaten)
+  const kodeKabAwal = /^\d{10}$/.test(state?.wilayahId ?? '')
+    ? state.wilayahId.slice(0, 4)
     : null
+  const initialProfile = desaAwal ?? (state?.wilayahId
+    ? { jenis: 'Desa', kodeDesa: state.wilayahId, nama: '', kabupaten: '' }
+    : null)
+  const fiturAwal = kodeKabAwal
+    ? jateng.features.find((f) => f.properties.id === kodeKabAwal)
+    : desaAwal
+      ? jateng.features.find((f) => f.properties.label === desaAwal.kabupaten)
+      : null
 
   const [panelTerbuka, setPanelTerbuka] = useState(false)
   const [aktif, setAktif] = useState({ administrasi: null, indikator: null })
   const [terpilihId, setTerpilihId] = useState(fiturAwal?.properties.id ?? null)
-  const [profil, setProfil] = useState(desaAwal)
-  const [profilTerbuka, setProfilTerbuka] = useState(Boolean(desaAwal))
+  const [profil, setProfil] = useState(initialProfile)
+  const [profilTerbuka, setProfilTerbuka] = useState(Boolean(state?.wilayahId))
   const [fasilitasDesa, setFasilitasDesa] = useState(null)
+  const [detailDesa, setDetailDesa] = useState(null)
+  const [detailDesaLoading, setDetailDesaLoading] = useState(Boolean(state?.wilayahId))
+  const [recommendations, setRecommendations] = useState(null)
+  const [recommendationsLoading, setRecommendationsLoading] = useState(Boolean(state?.wilayahId))
+  const [detailKabupaten, setDetailKabupaten] = useState(null)
+  const [detailKabupatenLoading, setDetailKabupatenLoading] = useState(false)
+  const [detailKabupatenError, setDetailKabupatenError] = useState(null)
+  const detailRequestRef = useRef(null)
 
   // Perintah ke peta: { jenis: 'reset' | 'lepasDesa', n: counter }
   const [sinyal, setSinyal] = useState({ jenis: null, n: 0 })
   const kirimSinyal = (jenis) => setSinyal((s) => ({ jenis, n: s.n + 1 }))
+
+  useEffect(() => {
+    if (!state?.wilayahId) return undefined
+
+    const controller = new AbortController()
+    detailRequestRef.current = controller
+    const { signal } = controller
+
+    apiFetch(`/api/map/fasilitas-desa/${state.wilayahId}`, { signal })
+      .then(async (response) => {
+        if (!response.ok) throw new Error(`Gagal mengambil fasilitas desa (${response.status})`)
+        const result = await response.json()
+        if (result.status !== 'success') {
+          throw new Error(result.message ?? 'Data fasilitas tidak tersedia')
+        }
+        setFasilitasDesa(result.data)
+      })
+      .catch((error) => {
+        if (!signal.aborted) console.error('Gagal ambil fasilitas:', error)
+      })
+
+    apiFetch(detailDesaUrl(state.wilayahId, recommendationContext), { signal })
+      .then(async (response) => {
+        if (!response.ok) throw new Error(`Gagal mengambil detail desa (${response.status})`)
+        const result = await response.json()
+        if (!result.data) throw new Error(result.message ?? 'Data detail desa tidak tersedia')
+        setDetailDesa(result.data)
+      })
+      .catch((error) => {
+        if (!signal.aborted) console.error('Gagal ambil detail desa:', error)
+      })
+      .finally(() => {
+        if (!signal.aborted) setDetailDesaLoading(false)
+      })
+
+    apiFetch(recommendationsUrl(state.wilayahId, recommendationContext), { signal })
+      .then(async (response) => {
+        if (!response.ok) throw new Error(`Gagal mengambil rekomendasi kegiatan (${response.status})`)
+        const result = await response.json()
+        if (result.status !== 'success' || !result.data) {
+          throw new Error(result.message ?? 'Data rekomendasi tidak tersedia')
+        }
+        setRecommendations(result.data.recommendations)
+      })
+      .catch((error) => {
+        if (!signal.aborted) {
+          console.error('Gagal ambil rekomendasi kegiatan:', error)
+          setRecommendations([])
+        }
+      })
+      .finally(() => {
+        if (!signal.aborted) setRecommendationsLoading(false)
+      })
+
+    return () => controller.abort()
+  }, [state?.wilayahId, recommendationContext])
 
   const toggleLapisan = (kelompok, id) => {
     setAktif((sebelumnya) => ({
@@ -54,11 +152,17 @@ function JelajahiPeta() {
     }))
   }
 
-  const handlePilih = useCallback(async (feature, tipe, namaKab) => {
+  const handlePilih = useCallback((feature, tipe, namaKab, kodeKab) => {
     if (tipe === 'desa') {
       const p = feature.properties
+      detailRequestRef.current?.abort()
+      const controller = new AbortController()
+      detailRequestRef.current = controller
+      const { signal } = controller
+
       setProfil({
         jenis: 'Desa',
+        kodeDesa: p.kode_desa,
         nama: p.nama_desa,
         kabupaten: namaKab ?? p.kode_kab,
         kelas: p.kelas,
@@ -73,30 +177,127 @@ function JelajahiPeta() {
       setProfilTerbuka(true)
       setPanelTerbuka(false)
       setFasilitasDesa(null)
+      setDetailDesa(null)
+      setDetailDesaLoading(true)
+      setRecommendations(null)
+      setRecommendationsLoading(true)
+      setDetailKabupaten(null)
+      setDetailKabupatenLoading(false)
+      setDetailKabupatenError(null)
 
-      try {
-        const res = await fetch(`http://127.0.0.1:8000/api/map/fasilitas-desa/${p.kode_desa}`)
-        const result = await res.json()
-        if (result.status === 'success') setFasilitasDesa(result.data)
-      } catch (error) {
-        console.error('Gagal ambil fasilitas:', error)
-      }
+      apiFetch(`/api/map/fasilitas-desa/${p.kode_desa}`, { signal })
+        .then(async (response) => {
+          if (!response.ok) throw new Error(`Gagal mengambil fasilitas desa (${response.status})`)
+          const result = await response.json()
+          if (result.status !== 'success') {
+            throw new Error(result.message ?? 'Data fasilitas tidak tersedia')
+          }
+          setFasilitasDesa(result.data)
+        })
+        .catch((error) => {
+          if (!signal.aborted) console.error('Gagal ambil fasilitas:', error)
+        })
+
+      const context = state?.wilayahId === p.kode_desa ? recommendationContext : null
+      apiFetch(detailDesaUrl(p.kode_desa, context), { signal })
+        .then(async (response) => {
+          if (!response.ok) throw new Error(`Gagal mengambil detail desa (${response.status})`)
+          const result = await response.json()
+          if (!result.data) throw new Error(result.message ?? 'Data detail desa tidak tersedia')
+          setDetailDesa(result.data)
+        })
+        .catch((error) => {
+          if (!signal.aborted) console.error('Gagal ambil detail desa:', error)
+        })
+        .finally(() => {
+          if (!signal.aborted) setDetailDesaLoading(false)
+        })
+
+      apiFetch(recommendationsUrl(p.kode_desa, context), { signal })
+        .then(async (response) => {
+          if (!response.ok) throw new Error(`Gagal mengambil rekomendasi kegiatan (${response.status})`)
+          const result = await response.json()
+          if (result.status !== 'success' || !result.data) {
+            throw new Error(result.message ?? 'Data rekomendasi tidak tersedia')
+          }
+          setRecommendations(result.data.recommendations)
+        })
+        .catch((error) => {
+          if (!signal.aborted) {
+            console.error('Gagal ambil rekomendasi kegiatan:', error)
+            setRecommendations([])
+          }
+        })
+        .finally(() => {
+          if (!signal.aborted) setRecommendationsLoading(false)
+        })
     } else {
+      detailRequestRef.current?.abort()
+      const controller = new AbortController()
+      detailRequestRef.current = controller
+      const label = feature.properties.label ?? ''
+      const isKota = label.startsWith('Kota ')
+
       setTerpilihId(feature.properties.id)
-      setProfil(buatProfil(feature.properties))
+      setProfil({
+        jenis: isKota ? 'Kota' : 'Kabupaten',
+        nama: label.replace(/^(Kabupaten|Kota)\s+/, ''),
+        kabupaten: 'Provinsi Jawa Tengah',
+      })
       setProfilTerbuka(true)
       setPanelTerbuka(false)
       setFasilitasDesa(null)
+      setDetailDesa(null)
+      setDetailDesaLoading(false)
+      setRecommendations(null)
+      setRecommendationsLoading(false)
+      setDetailKabupaten(null)
+      setDetailKabupatenError(null)
+
+      if (!kodeKab) {
+        setDetailKabupatenLoading(false)
+        setDetailKabupatenError('Kode kabupaten tidak tersedia untuk wilayah ini.')
+        return
+      }
+
+      setDetailKabupatenLoading(true)
+      apiFetch(`/api/v1/regions/kabupaten/${kodeKab}`, { signal: controller.signal })
+        .then(async (response) => {
+          if (!response.ok) throw new Error(`Gagal mengambil indikator kabupaten (${response.status})`)
+          const result = await response.json()
+          if (result.status !== 'success' || !result.data) {
+            throw new Error(result.message ?? 'Data indikator kabupaten tidak tersedia.')
+          }
+          setDetailKabupaten(result.data)
+        })
+        .catch((error) => {
+          if (!controller.signal.aborted) {
+            console.error('Gagal ambil indikator kabupaten:', error)
+            setDetailKabupatenError(error.message)
+          }
+        })
+        .finally(() => {
+          if (!controller.signal.aborted) setDetailKabupatenLoading(false)
+        })
     }
-  }, [])
+  }, [recommendationContext, state?.wilayahId])
 
   // Tombol X di panel profil:
   // - dari profil desa      -> tetap di peta desa kabupaten tsb
   // - dari profil kabupaten -> kembali ke peta Jawa Tengah
   const handleTutupProfil = () => {
+    detailRequestRef.current?.abort()
+    detailRequestRef.current = null
     const dariDesa = profil?.jenis === 'Desa'
     setProfilTerbuka(false)
     setFasilitasDesa(null)
+    setDetailDesa(null)
+    setDetailDesaLoading(false)
+    setRecommendations(null)
+    setRecommendationsLoading(false)
+    setDetailKabupaten(null)
+    setDetailKabupatenLoading(false)
+    setDetailKabupatenError(null)
     if (dariDesa) {
       kirimSinyal('lepasDesa')
     } else {
@@ -107,9 +308,16 @@ function JelajahiPeta() {
 
   // Tombol "Kembali ke Peta Kabupaten" di peta
   const handleKembaliKePeta = () => {
+    detailRequestRef.current?.abort()
+    detailRequestRef.current = null
     setProfilTerbuka(false)
     setTerpilihId(null)
     setFasilitasDesa(null)
+    setDetailDesa(null)
+    setDetailDesaLoading(false)
+    setDetailKabupaten(null)
+    setDetailKabupatenLoading(false)
+    setDetailKabupatenError(null)
   }
 
   const handleBukaLapisan = () => {
@@ -136,6 +344,7 @@ function JelajahiPeta() {
           onPilih={handlePilih}
           sinyal={sinyal}
           onKembali={handleKembaliKePeta}
+          initialDesaId={kodeKabAwal ? state.wilayahId : null}
         />
         <ZoomButtons />
       </MapContainer>
@@ -156,6 +365,13 @@ function JelajahiPeta() {
         <ProfilWilayah
           wilayah={profil}
           fasilitas={fasilitasDesa}
+          detailDesa={detailDesa}
+          detailDesaLoading={detailDesaLoading}
+          recommendations={recommendations}
+          recommendationsLoading={recommendationsLoading}
+          detailKabupaten={detailKabupaten}
+          detailKabupatenLoading={detailKabupatenLoading}
+          detailKabupatenError={detailKabupatenError}
           onClose={handleTutupProfil}
         />
       )}

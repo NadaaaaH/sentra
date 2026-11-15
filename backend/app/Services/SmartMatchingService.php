@@ -15,9 +15,7 @@ use UnexpectedValueException;
 
 class SmartMatchingService
 {
-    private const DEFAULT_DOMISILI = '3301012001';
-
-    private const DEFAULT_RADIUS_KM = 10;
+    private const DEFAULT_RADIUS_KM = 30;
 
     private const CATEGORY_LABELS = [
         'kesehatan' => 'Kesehatan',
@@ -49,67 +47,85 @@ class SmartMatchingService
             ->all();
     }
 
+    public function searchLocations(string $search): array
+    {
+        $keyword = '%'.mb_strtolower(trim($search)).'%';
+
+        $kabupaten = DB::table('kabupaten')
+            ->whereRaw('LOWER(nama_kabupaten) LIKE ?', [$keyword])
+            ->orderBy('nama_kabupaten')
+            ->limit(5)
+            ->get(['kode_kab', 'nama_kabupaten', 'tipe'])
+            ->map(fn (object $item): array => [
+                'type' => 'kabupaten',
+                'code' => (string) $item->kode_kab,
+                'kindLabel' => $item->tipe === 'kota' ? 'Kota' : 'Kabupaten',
+                'name' => $item->nama_kabupaten,
+                'label' => ($item->tipe === 'kota' ? 'Kota ' : 'Kabupaten ').$item->nama_kabupaten,
+            ]);
+
+        $desa = DB::table('desa')
+            ->join('desa_geom', 'desa.kode_desa', '=', 'desa_geom.kode_desa')
+            ->join('kecamatan', 'desa.kode_kec', '=', 'kecamatan.kode_kec')
+            ->join('kabupaten', 'kecamatan.kode_kab', '=', 'kabupaten.kode_kab')
+            ->whereRaw('LOWER(desa.nama_desa) LIKE ?', [$keyword])
+            ->orderBy('desa.nama_desa')
+            ->limit(10)
+            ->get([
+                'desa.kode_desa',
+                'desa.nama_desa',
+                'desa.unit_type',
+                'kecamatan.nama_kecamatan',
+                'kabupaten.nama_kabupaten',
+            ])
+            ->map(fn (object $item): array => [
+                'type' => 'desa',
+                'code' => (string) $item->kode_desa,
+                'kindLabel' => strtolower((string) $item->unit_type) === 'kelurahan'
+                    ? 'Kelurahan'
+                    : 'Desa',
+                'name' => $item->nama_desa,
+                'label' => mb_convert_case($item->nama_desa, MB_CASE_TITLE, 'UTF-8'),
+                'subtitle' => $item->nama_kecamatan.', '.$item->nama_kabupaten,
+            ]);
+
+        return $kabupaten->concat($desa)->values()->all();
+    }
+
     public function processSmartMatching(array $input): array
     {
-        // TODO(FRONTEND): hapus default domisili ini setelah frontend mengirim `domisili`, lalu ubah rule `domisili` di SmartMatchingRequest menjadi required.
-        $domisili = $input['domisili'] ?? self::DEFAULT_DOMISILI;
+        $locationType = $input['location_type'] ?? null;
+        $locationCode = $input['location_code'] ?? null;
         $radiusKm = (float) ($input['radius_km'] ?? self::DEFAULT_RADIUS_KM);
+        $offset = (int) ($input['offset'] ?? 0);
+        $limit = (int) ($input['limit'] ?? 5);
 
         $activities = $this->programActivities($input['bidang']);
         if ($activities->isEmpty()) {
             return [
                 'matches' => [],
+                'total' => 0,
+                'has_more' => false,
                 'message' => 'Belum ada acuan aktivitas dengan rentang anggaran, jumlah pelaksana, dan durasi yang valid untuk bidang ini.',
             ];
         }
 
-        $durationFeasibleActivities = $activities
-            ->filter(fn (Activity $activity): bool => (int) $activity->duration_days <= (int) $input['durasi']);
+        $requirements = $this->closestActivity($activities, $input);
+        $nearbyDistances = collect();
+        if ($locationType === 'desa') {
+            $nearbyDistances = $this->nearbyVillageDistances((string) $locationCode, $radiusKm);
 
-        if ($durationFeasibleActivities->isEmpty()) {
-            $nearestDuration = (int) $activities->min('duration_days');
-            $shortestActivity = $activities->firstWhere('duration_days', $nearestDuration);
-
-            return [
-                'matches' => [],
-                'message' => sprintf(
-                    'Durasi %d hari belum memungkinkan untuk aktivitas di bidang ini. Durasi terpendek pada acuan adalah %d hari (%s). Tambah durasi atau sesuaikan cakupan program.',
-                    (int) $input['durasi'],
-                    $nearestDuration,
-                    $shortestActivity->title,
-                ),
-            ];
-        }
-
-        if (! DB::table('desa_geom')->where('kode_desa', $domisili)->exists()) {
-            return [
-                'matches' => [],
-                'message' => 'Desa domisili belum memiliki geometri yang dapat digunakan.',
-            ];
-        }
-
-        $requirements = $this->closestActivity($durationFeasibleActivities, $input);
-        $isSqliteTest = app()->environment('testing')
-            && DB::connection()->getDriverName() === 'sqlite';
-        $geographyCast = $isSqliteTest ? '' : '::geography';
-        $distanceExpression = "ST_Distance(
-            ST_Centroid(candidate_geom.geom){$geographyCast},
-            ST_Centroid(origin_geom.geom){$geographyCast}
-        ) / 1000.0";
-        $nearbyDistances = collect(DB::select(
-            "SELECT candidate_geom.kode_desa AS region_id, {$distanceExpression} AS distance_km
-            FROM desa_geom AS candidate_geom
-            CROSS JOIN desa_geom AS origin_geom
-            WHERE origin_geom.kode_desa = ?
-                AND {$distanceExpression} <= CAST(? AS DOUBLE PRECISION)",
-            [$domisili, $radiusKm],
-        ))->keyBy('region_id');
-
-        if ($nearbyDistances->isEmpty()) {
-            return [
-                'matches' => [],
-                'message' => sprintf('Tidak ada desa dalam radius %s km dari domisili.', rtrim(rtrim(number_format($radiusKm, 1, ',', '.'), '0'), ',')),
-            ];
+            if ($nearbyDistances->isEmpty()) {
+                return [
+                    'matches' => [],
+                    'total' => 0,
+                    'has_more' => false,
+                    'message' => sprintf(
+                        'Tidak ada desa dalam radius %s km dari lokasi yang dipilih.',
+                        rtrim(rtrim(number_format($radiusKm, 1, ',', '.'), '0'), ','),
+                    ),
+                ];
+            }
         }
 
         $query = Desa::query()
@@ -124,11 +140,19 @@ class SmartMatchingService
                 'jarak_sekolah_resmi_km',
                 'jarak_faskes_fix_km',
             ])
-            ->whereIn('kode_desa', $nearbyDistances->keys())
             ->with([
                 'kecamatan:kode_kec,kode_kab,nama_kecamatan',
                 'kecamatan.kabupaten:kode_kab,nama_kabupaten,akses_air_minum_persen,akses_internet_layak_persen',
             ]);
+
+        if ($locationType === 'desa') {
+            $query->whereIn('kode_desa', $nearbyDistances->keys());
+        } elseif ($locationType === 'kabupaten') {
+            $query->whereHas(
+                'kecamatan',
+                fn ($query) => $query->where('kode_kab', $locationCode),
+            );
+        }
 
         match ($input['bidang']) {
             'kesehatan' => $query->where(function ($query): void {
@@ -156,25 +180,64 @@ class SmartMatchingService
                 $desa,
                 $input,
                 $requirements,
-                (float) $nearbyDistances[$desa->kode_desa]->distance_km,
+                $locationType === 'desa'
+                    ? (float) $nearbyDistances[$desa->kode_desa]->distance_km
+                    : null,
+                $locationType,
+                $radiusKm,
             ))
             ->filter()
-            ->sortByDesc('match_score')
-            ->take(5)
-            ->values()
-            ->all();
+            ->sort(fn (array $first, array $second): int => (
+                ($second['match_score'] <=> $first['match_score'])
+                ?: strcmp($first['region_id'], $second['region_id'])
+            ))
+            ->values();
 
         if ($candidates === []) {
             return [
                 'matches' => [],
+                'total' => 0,
+                'has_more' => false,
                 'message' => 'Belum ada wilayah dengan data indikator yang cukup untuk bidang ini.',
             ];
         }
 
+        $total = $candidates->count();
+        $page = $candidates->slice($offset, $limit)->values()->all();
+
         return [
-            'matches' => $this->addAiExplanations($input, $requirements, $candidates),
-            'message' => 'Berhasil mencocokkan program dengan wilayah target',
+            'matches' => $this->addAiExplanations($input, $requirements, $page),
+            'total' => $total,
+            'has_more' => $offset + count($page) < $total,
+            'message' => match ($locationType) {
+                'desa' => sprintf(
+                    'Berhasil mencocokkan program di sekitar lokasi dalam radius %s km.',
+                    rtrim(rtrim(number_format($radiusKm, 1, ',', '.'), '0'), ','),
+                ),
+                'kabupaten' => 'Berhasil mencocokkan program di kabupaten/kota yang dipilih.',
+                default => 'Berhasil mencocokkan program dengan seluruh wilayah tersedia.',
+            },
         ];
+    }
+
+    private function nearbyVillageDistances(string $originCode, float $radiusKm)
+    {
+        $isSqliteTest = app()->environment('testing')
+            && DB::connection()->getDriverName() === 'sqlite';
+        $geographyCast = $isSqliteTest ? '' : '::geography';
+        $distanceExpression = "ST_Distance(
+            ST_Centroid(candidate_geom.geom){$geographyCast},
+            ST_Centroid(origin_geom.geom){$geographyCast}
+        ) / 1000.0";
+
+        return collect(DB::select(
+            "SELECT candidate_geom.kode_desa AS region_id, {$distanceExpression} AS distance_km
+            FROM desa_geom AS candidate_geom
+            CROSS JOIN desa_geom AS origin_geom
+            WHERE origin_geom.kode_desa = ?
+                AND {$distanceExpression} <= CAST(? AS DOUBLE PRECISION)",
+            [$originCode, $radiusKm],
+        ))->keyBy('region_id');
     }
 
     private function programActivities(string $category): Collection
@@ -234,8 +297,9 @@ class SmartMatchingService
     private function activityDistance(Activity $activity, array $input): float
     {
         $budget = (float) $input['anggaran'];
-        $minimumBudget = (float) $activity->min_budget;
-        $maximumBudget = (float) $activity->max_budget;
+        $durationScale = max(1, (int) $input['durasi'] / (int) $activity->duration_days);
+        $minimumBudget = (float) $activity->min_budget * $durationScale;
+        $maximumBudget = (float) $activity->max_budget * $durationScale;
         $budgetDistance = match (true) {
             $budget < $minimumBudget => ($minimumBudget - $budget) / $minimumBudget,
             $budget > $maximumBudget => ($budget - $maximumBudget) / max($maximumBudget, 1),
@@ -253,7 +317,9 @@ class SmartMatchingService
         Desa $desa,
         array $input,
         Activity $requirements,
-        float $distanceKm,
+        ?float $distanceKm,
+        ?string $locationType,
+        float $radiusKm,
     ): ?array {
         $urgensiBidang = $this->sectorUrgency($desa, $input['bidang']);
 
@@ -262,15 +328,24 @@ class SmartMatchingService
         }
 
         $budget = (float) $input['anggaran'];
-        $skorAnggaran = $budget < $requirements->min_budget
-            ? ($budget / $requirements->min_budget) * 100
+        $minimumBudget = $this->minimumBudgetForDuration($requirements, $input);
+        $skorAnggaran = $budget < $minimumBudget
+            ? ($budget / $minimumBudget) * 100
             : 100;
         $skorPelaksana = min(((int) $input['pelaksana'] / $requirements->required_people) * 100, 100);
-        $skorDurasi = 100;
+        $skorDurasi = min(((int) $input['durasi'] / $requirements->duration_days) * 100, 100);
         $skorKapasitas = ($skorAnggaran * 0.5) + ($skorPelaksana * 0.25) + ($skorDurasi * 0.25);
-        $resourcesMeetMinimum = $budget >= $requirements->min_budget
-            && (int) $input['pelaksana'] >= $requirements->required_people;
-        $matchScore = (int) round(($urgensiBidang * 0.6) + ($skorKapasitas * 0.4));
+        $skorResourceMinimum = min($skorAnggaran, $skorPelaksana, $skorDurasi);
+        $resourcesMeetMinimum = $budget >= $minimumBudget
+            && (int) $input['pelaksana'] >= $requirements->required_people
+            && (int) $input['durasi'] >= $requirements->duration_days;
+        $programMatchScore = (int) round(($urgensiBidang * 0.5) + ($skorResourceMinimum * 0.5));
+        $proximityScore = $locationType === 'desa' && $distanceKm !== null
+            ? round(max(0, 1 - ($distanceKm / $radiusKm)) * 100)
+            : null;
+        $matchScore = $locationType === 'desa' && $proximityScore !== null
+            ? (int) round(($programMatchScore * 0.6) + ($proximityScore * 0.4))
+            : $programMatchScore;
         $kecamatan = $desa->kecamatan;
         $kabupaten = $kecamatan?->kabupaten;
 
@@ -278,10 +353,20 @@ class SmartMatchingService
             'region_id' => (string) $desa->kode_desa,
             'village_name' => ucfirst($desa->unit_type).' '.mb_convert_case($desa->nama_desa, MB_CASE_TITLE, 'UTF-8'),
             'district_name' => $kecamatan?->nama_kecamatan ?? '-',
+            'county_name' => $kabupaten?->nama_kabupaten,
             'match_score' => $matchScore,
-            'distance_km' => round($distanceKm, 1),
+            'program_match_score' => $programMatchScore,
+            'proximity_score' => $proximityScore,
+            'distance_km' => $distanceKm === null ? null : round($distanceKm, 1),
             'urgency_level' => $this->urgencyLabel($urgensiBidang),
             'feasibility_status' => $this->feasibilityLabel($skorKapasitas, $resourcesMeetMinimum),
+            'resources_sufficient' => $resourcesMeetMinimum,
+            'feasibility_message' => $this->feasibilityMessage(
+                $input,
+                $requirements,
+                $resourcesMeetMinimum,
+                $minimumBudget,
+            ),
             'match_reason' => $this->fallbackReason(
                 $desa,
                 $input,
@@ -294,9 +379,13 @@ class SmartMatchingService
                 'sector_urgency_score' => (int) round($urgensiBidang),
                 'capacity_score' => (int) round($skorKapasitas),
                 'budget_score' => (int) round($skorAnggaran),
-                'distance_km' => round($distanceKm, 1),
-                'minimum_budget' => $requirements->min_budget,
-                'maximum_budget' => $requirements->max_budget,
+                'distance_km' => $distanceKm === null ? null : round($distanceKm, 1),
+                'proximity_score' => $proximityScore,
+                'minimum_budget' => $minimumBudget,
+                'maximum_budget' => $requirements->max_budget * max(
+                    1,
+                    (int) $input['durasi'] / (int) $requirements->duration_days,
+                ),
                 'activity_title' => $requirements->title,
                 'health_index_gap_percent' => $desa->iks_2024 === null
                     ? null
@@ -379,6 +468,60 @@ class SmartMatchingService
         };
     }
 
+    private function feasibilityMessage(
+        array $input,
+        Activity $requirements,
+        bool $resourcesMeetMinimum,
+        float $minimumBudget,
+    ): string {
+        $issues = [];
+        $budget = (float) $input['anggaran'];
+        $people = (int) $input['pelaksana'];
+        $requiredPeople = (int) $requirements->required_people;
+        $duration = (int) $input['durasi'];
+        $requiredDuration = (int) $requirements->duration_days;
+
+        if ($budget < $minimumBudget) {
+            $issues[] = sprintf(
+                'Anggaran operasional berpotensi tidak mencukupi untuk durasi %d hari (Rp%s tersedia; estimasi minimum Rp%s).',
+                $duration,
+                number_format($budget, 0, ',', '.'),
+                number_format($minimumBudget, 0, ',', '.'),
+            );
+        }
+
+        if ($people < $requiredPeople) {
+            $issues[] = sprintf(
+                'Jumlah pelaksana berpotensi kurang (%d tersedia; acuan %d orang).',
+                $people,
+                $requiredPeople,
+            );
+        }
+
+        if ($duration < $requiredDuration) {
+            $issues[] = sprintf(
+                'Durasi pelaksanaan berpotensi tidak mencukupi (%d hari tersedia; acuan %d hari).',
+                $duration,
+                $requiredDuration,
+            );
+        }
+
+        if ($issues !== []) {
+            return implode(' ', $issues);
+        }
+
+        return $resourcesMeetMinimum
+            ? 'Anggaran, jumlah pelaksana, dan durasi sudah sesuai kebutuhan.'
+            : 'Kelayakan sumber daya perlu disesuaikan dengan kebutuhan kegiatan.';
+    }
+
+    private function minimumBudgetForDuration(Activity $activity, array $input): float
+    {
+        $durationScale = max(1, (int) $input['durasi'] / (int) $activity->duration_days);
+
+        return (float) $activity->min_budget * $durationScale;
+    }
+
     private function fallbackReason(
         Desa $desa,
         array $input,
@@ -413,13 +556,22 @@ class SmartMatchingService
         $budgetRange = sprintf(
             'Acuan aktivitas terdekat adalah "%s" dengan rentang anggaran Rp%s–Rp%s',
             $requirements->title,
-            number_format($requirements->min_budget, 0, ',', '.'),
-            number_format($requirements->max_budget, 0, ',', '.'),
+            number_format($this->minimumBudgetForDuration($requirements, $input), 0, ',', '.'),
+            number_format(
+                (float) $requirements->max_budget * max(
+                    1,
+                    (int) $input['durasi'] / (int) $requirements->duration_days,
+                ),
+                0,
+                ',',
+                '.',
+            ),
         );
 
+        $minimumBudget = $this->minimumBudgetForDuration($requirements, $input);
         $budget = match (true) {
-            (float) $input['anggaran'] < $requirements->min_budget => 'Anggaran pengguna di bawah batas minimum aktivitas sehingga cakupan perlu disesuaikan',
-            (float) $input['anggaran'] > $requirements->max_budget => 'Anggaran pengguna di atas rentang acuan aktivitas, tetapi memenuhi batas minimum',
+            (float) $input['anggaran'] < $minimumBudget => 'Anggaran pengguna di bawah estimasi minimum aktivitas untuk durasi yang dipilih sehingga cakupan perlu disesuaikan',
+            (float) $input['anggaran'] > $requirements->max_budget * max(1, (int) $input['durasi'] / (int) $requirements->duration_days) => 'Anggaran pengguna di atas rentang estimasi acuan aktivitas, tetapi memenuhi batas minimum',
             default => 'Anggaran pengguna berada dalam rentang acuan aktivitas',
         };
 
@@ -464,12 +616,15 @@ class SmartMatchingService
         if ($capacityScore < 60
             || $budgetScore < 100
             || (int) $input['pelaksana'] < $requirements->required_people
+            || (int) $input['durasi'] < $requirements->duration_days
         ) {
+            $minimumBudget = $this->minimumBudgetForDuration($requirements, $input);
+
             return sprintf(
-                'Acuan terdekat: "%s". Mulai dengan pilot %s berskala terbatas; anggaran minimum acuannya Rp%s dengan %d pelaksana selama %d hari.',
+                'Acuan terdekat: "%s". Mulai dengan pilot %s berskala terbatas; estimasi anggaran minimum Rp%s dengan %d pelaksana selama %d hari.',
                 $requirements->title,
                 $actions[$input['bidang']],
-                number_format($requirements->min_budget, 0, ',', '.'),
+                number_format($minimumBudget, 0, ',', '.'),
                 $requirements->required_people,
                 $requirements->duration_days,
             );
