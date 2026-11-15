@@ -4,6 +4,7 @@ namespace Tests\Feature;
 
 use App\Services\KabupatenIndicatorService;
 use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Tests\TestCase;
@@ -13,6 +14,7 @@ class KabupatenIndicatorServiceTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
+        Cache::flush();
 
         Schema::create('kabupaten', function (Blueprint $table): void {
             $table->string('kode_kab')->primary();
@@ -81,8 +83,13 @@ class KabupatenIndicatorServiceTest extends TestCase
         ]);
 
         $result = app(KabupatenIndicatorService::class)->getByKode('3301');
+        DB::table('kabupaten')->where('kode_kab', '3301')->update([
+            'akses_internet_layak_persen' => 20,
+        ]);
+        $cachedResult = app(KabupatenIndicatorService::class)->getByKode('3301');
 
         $this->assertSame(2, $result['jumlahDesa']);
+        $this->assertSame($result, $cachedResult);
         $this->assertSame(1, $result['jumlahDesaUrgent']);
         $this->assertSame([
             ['label' => 'Kondisi Ekonomi', 'nilai' => 30.0],

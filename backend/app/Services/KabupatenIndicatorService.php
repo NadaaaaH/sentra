@@ -2,11 +2,21 @@
 
 namespace App\Services;
 
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 
 class KabupatenIndicatorService
 {
     public function getByKode(string $kodeKab): ?array
+    {
+        return Cache::remember(
+            "kabupaten-indicators:v1:{$kodeKab}",
+            now()->addMinutes(10),
+            fn (): ?array => $this->calculateByKode($kodeKab),
+        );
+    }
+
+    private function calculateByKode(string $kodeKab): ?array
     {
         $kabupaten = DB::table('kabupaten')
             ->where('kode_kab', $kodeKab)

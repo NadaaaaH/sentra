@@ -9,6 +9,7 @@ use App\Services\ActivityRecommendationService;
 use App\Services\KabupatenIndicatorService;
 use App\Traits\ApiResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Validation\Rule;
 
 class RegionController extends Controller
@@ -27,8 +28,29 @@ class RegionController extends Controller
             ...$this->recommendationContextRules(),
             'include_recommendations' => ['sometimes', 'in:true,false,1,0'],
         ]);
+        $includeRecommendations = filter_var(
+            $validated['include_recommendations'] ?? false,
+            FILTER_VALIDATE_BOOLEAN,
+        );
 
-        // Query data desa beserta relasi kecamatan dan indeks urgensi
+        if (! $includeRecommendations) {
+            $data = Cache::remember(
+                "desa-detail:v1:{$kode_desa}",
+                now()->addMinutes(10),
+                fn (): ?array => $this->desaDetailData($kode_desa, $request),
+            );
+
+            if ($data === null) {
+                return $this->error('Data desa tidak ditemukan', 404);
+            }
+
+            return response()->json([
+                'data' => $data,
+                'status' => 'Success',
+                'message' => 'Detail profil desa berhasil dimuat.',
+            ]);
+        }
+
         $desa = Desa::with(['kecamatan.kabupaten', 'indeksUrgensi'])
             ->where('kode_desa', $kode_desa)
             ->first();
@@ -37,12 +59,7 @@ class RegionController extends Controller
             return $this->error('Data desa tidak ditemukan', 404);
         }
 
-        $result = filter_var(
-            $validated['include_recommendations'] ?? false,
-            FILTER_VALIDATE_BOOLEAN,
-        )
-            ? $recommendations->generate($desa, $validated)
-            : ['recommendations' => [], 'ai_available' => false];
+        $result = $recommendations->generate($desa, $validated);
         $desa->setAttribute('recommendations', $result['recommendations']);
         $desa->setAttribute('ai_available', $result['ai_available']);
 
@@ -51,6 +68,22 @@ class RegionController extends Controller
                 'status' => 'Success',
                 'message' => 'Detail profil desa berhasil dimuat.',
             ]);
+    }
+
+    private function desaDetailData(string $kodeDesa, Request $request): ?array
+    {
+        $desa = Desa::with(['kecamatan.kabupaten', 'indeksUrgensi'])
+            ->where('kode_desa', $kodeDesa)
+            ->first();
+
+        if (! $desa) {
+            return null;
+        }
+
+        $desa->setAttribute('recommendations', []);
+        $desa->setAttribute('ai_available', false);
+
+        return (new DesaDetailResource($desa))->resolve($request);
     }
 
     public function showRecommendations(

@@ -32,6 +32,7 @@ RUN composer install \
 
 ENV APP_ENV=production
 ENV APP_DEBUG=false
+ENV CACHE_STORE=file
 
 EXPOSE 10000
 

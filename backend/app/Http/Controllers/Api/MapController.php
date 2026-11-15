@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 
 class MapController extends Controller
@@ -226,49 +227,57 @@ class MapController extends Controller
         ]);
     }
 
-        /**
+    /**
      * Endpoint: GET /api/map/fasilitas-desa/{kode_desa}
      * Menghitung & menampilkan fasilitas (faskes & sekolah) di dalam 1 desa
      */
     public function fasilitasDesa($kode_desa)
     {
-        // 1. Ambil data desa sekaligus geometrinya
-        $desa = DB::table('desa_geom')
-            ->join('desa', 'desa_geom.kode_desa', '=', 'desa.kode_desa')
-            ->where('desa.kode_desa', $kode_desa)
-            ->select('desa.nama_desa', 'desa_geom.geom')
-            ->first();
+        $data = Cache::remember(
+            "desa-fasilitas:v1:{$kode_desa}",
+            now()->addMinutes(30),
+            function () use ($kode_desa): ?array {
+                $desa = DB::table('desa_geom')
+                    ->join('desa', 'desa_geom.kode_desa', '=', 'desa.kode_desa')
+                    ->where('desa.kode_desa', $kode_desa)
+                    ->select('desa.nama_desa', 'desa_geom.geom')
+                    ->first();
 
-        if (!$desa) {
+                if (! $desa) {
+                    return null;
+                }
+
+                $faskes = DB::table('faskes_point')
+                    ->whereRaw('ST_Contains(?, faskes_point.geom)', [$desa->geom])
+                    ->select('id', 'nama', 'tipe_faskes', 'lat', 'lon')
+                    ->get();
+
+                $sekolah = DB::table('sekolah_point')
+                    ->whereRaw('ST_Contains(?, sekolah_point.geom)', [$desa->geom])
+                    ->select('id', 'nama', 'jenjang', 'lat', 'lon')
+                    ->get();
+
+                return [
+                    'desa' => $desa->nama_desa,
+                    'total_faskes' => $faskes->count(),
+                    'total_sekolah' => $sekolah->count(),
+                    'detail_faskes' => $faskes,
+                    'detail_sekolah' => $sekolah,
+                ];
+            },
+        );
+
+        if ($data === null) {
             return response()->json(['message' => 'Desa tidak ditemukan'], 404);
         }
 
-        // 2. Hitung jumlah faskes di dalam poligon desa
-        $faskes = DB::table('faskes_point')
-            ->whereRaw("ST_Contains(?, faskes_point.geom)", [$desa->geom])
-            ->select('id', 'nama', 'tipe_faskes', 'lat', 'lon')
-            ->get();
-
-        // 3. Hitung jumlah sekolah di dalam poligon desa
-        $sekolah = DB::table('sekolah_point')
-            ->whereRaw("ST_Contains(?, sekolah_point.geom)", [$desa->geom])
-            ->select('id', 'nama', 'jenjang', 'lat', 'lon')
-            ->get();
-
-        // 4. Kembalikan response
         return response()->json([
             'status' => 'success',
-            'data' => [
-                'desa' => $desa->nama_desa,
-                'total_faskes' => $faskes->count(),
-                'total_sekolah' => $sekolah->count(),
-                'detail_faskes' => $faskes,
-                'detail_sekolah' => $sekolah,
-            ]
+            'data' => $data,
         ]);
     }
 
-        /**
+    /**
      * Endpoint: GET /api/map/search?q=keyword
      * Mencari Kabupaten atau Desa berdasarkan nama
      */
