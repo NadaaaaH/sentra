@@ -10,7 +10,7 @@ class KabupatenIndicatorService
     public function getByKode(string $kodeKab): ?array
     {
         return Cache::remember(
-            "kabupaten-indicators:v1:{$kodeKab}",
+            "kabupaten-indicators:v3:{$kodeKab}",
             now()->addMinutes(10),
             fn (): ?array => $this->calculateByKode($kodeKab),
         );
@@ -36,7 +36,7 @@ class KabupatenIndicatorService
             ->leftJoin('indeks_urgensi', 'desa.kode_desa', '=', 'indeks_urgensi.kode_desa')
             ->where('kecamatan.kode_kab', $kodeKab)
             ->selectRaw('COUNT(desa.kode_desa) AS jumlah_desa')
-            ->selectRaw('AVG(indeks_urgensi.skor_komposit) AS rata_urgensi')
+            ->selectRaw('AVG(indeks_urgensi.kelas_urgensi) AS rata_urgensi')
             ->selectRaw('SUM(CASE WHEN indeks_urgensi.kelas_urgensi = 5 THEN 1 ELSE 0 END) AS jumlah_desa_urgent')
             ->selectRaw(
                 'AVG(CASE WHEN desa.ike_2024 IS NOT NULL THEN (1.0 - desa.ike_2024) * 100 END) AS ekonomi'
@@ -70,10 +70,15 @@ class KabupatenIndicatorService
             if ($nilai !== null) {
                 $kesenjangan[] = [
                     'label' => $label,
-                    'nilai' => round((float) $nilai, 2),
+                    'nilai' => round((float) $nilai, 1),
                 ];
             }
         }
+
+        // Skala 1-5, rata-rata kelas_urgensi seluruh desa (sama dengan warna peta)
+        $indeks = $rataRata->rata_urgensi !== null
+            ? round((float) $rataRata->rata_urgensi, 1)
+            : null;
 
         return [
             'jenis' => $kabupaten->tipe === 'kota' ? 'Kota' : 'Kabupaten',
@@ -81,9 +86,7 @@ class KabupatenIndicatorService
             'nama' => $kabupaten->nama_kabupaten,
             'jumlahDesa' => (int) $rataRata->jumlah_desa,
             'jumlahDesaUrgent' => (int) ($rataRata->jumlah_desa_urgent ?? 0),
-            'indeksUrgensi' => $rataRata->rata_urgensi !== null
-                ? round((float) $rataRata->rata_urgensi)
-                : 0,
+            'indeksUrgensi' => $indeks,   // contoh: 3.1
             'kesenjangan' => $kesenjangan,
         ];
     }

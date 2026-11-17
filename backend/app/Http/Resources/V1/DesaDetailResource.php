@@ -61,7 +61,13 @@ class DesaDetailResource extends JsonResource
             'kabupaten' => $kabupaten?->nama_kabupaten,
             'penduduk' => null,
             'luas' => null,
+            
+            // --- BAGIAN YANG DIUBAH (Hanya soal Index) ---
             'indeksUrgensi' => $this->indeksUrgensi?->skor_komposit,
+            'kelas' => $this->indeksUrgensi?->kelas_urgensi,           // 🚀 TAMBAHAN
+            'labelUrgensi' => $this->indeksUrgensi?->label_urgensi,    // 🚀 TAMBAHAN
+            // ----------------------------------------------
+            
             'nilaiIdm' => $this->nilai_idm_2024,
             'statusIdm' => $this->status_idm_2024,
             'jarakSekolahKm' => $this->jarak_sekolah_resmi_km,
