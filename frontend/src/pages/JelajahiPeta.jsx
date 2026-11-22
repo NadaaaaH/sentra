@@ -76,10 +76,15 @@ function JelajahiPeta() {
   const [profil, setProfil] = useState(initialProfile)
   const [profilTerbuka, setProfilTerbuka] = useState(Boolean(state?.wilayahId))
   const [fasilitasDesa, setFasilitasDesa] = useState(null)
+  const [fasilitasDesaLoading, setFasilitasDesaLoading] = useState(Boolean(state?.wilayahId))
+  const [fasilitasDesaError, setFasilitasDesaError] = useState(null)
   const [detailDesa, setDetailDesa] = useState(null)
   const [detailDesaLoading, setDetailDesaLoading] = useState(Boolean(state?.wilayahId))
+  const [detailDesaError, setDetailDesaError] = useState(null)
   const [recommendations, setRecommendations] = useState(null)
   const [recommendationsLoading, setRecommendationsLoading] = useState(Boolean(state?.wilayahId))
+  const [recommendationsError, setRecommendationsError] = useState(null)
+  const [tahapDetailTampil, setTahapDetailTampil] = useState(0)
   const [detailKabupaten, setDetailKabupaten] = useState(null)
   const [detailKabupatenLoading, setDetailKabupatenLoading] = useState(false)
   const [detailKabupatenError, setDetailKabupatenError] = useState(null)
@@ -100,24 +105,35 @@ function JelajahiPeta() {
       .then(async (response) => {
         if (!response.ok) throw new Error(`Gagal mengambil fasilitas desa (${response.status})`)
         const result = await response.json()
+        if (signal.aborted) return
         if (result.status !== 'success') {
           throw new Error(result.message ?? 'Data fasilitas tidak tersedia')
         }
         setFasilitasDesa(result.data)
       })
       .catch((error) => {
-        if (!signal.aborted) console.error('Gagal ambil fasilitas:', error)
+        if (!signal.aborted) {
+          console.error('Gagal ambil fasilitas:', error)
+          setFasilitasDesaError('Gagal memuat fasilitas desa.')
+        }
+      })
+      .finally(() => {
+        if (!signal.aborted) setFasilitasDesaLoading(false)
       })
 
     apiFetch(detailDesaUrl(state.wilayahId, recommendationContext), { signal })
       .then(async (response) => {
         if (!response.ok) throw new Error(`Gagal mengambil detail desa (${response.status})`)
         const result = await response.json()
+        if (signal.aborted) return
         if (!result.data) throw new Error(result.message ?? 'Data detail desa tidak tersedia')
         setDetailDesa(result.data)
       })
       .catch((error) => {
-        if (!signal.aborted) console.error('Gagal ambil detail desa:', error)
+        if (!signal.aborted) {
+          console.error('Gagal ambil detail desa:', error)
+          setDetailDesaError('Gagal memuat data desa.')
+        }
       })
       .finally(() => {
         if (!signal.aborted) setDetailDesaLoading(false)
@@ -127,6 +143,7 @@ function JelajahiPeta() {
       .then(async (response) => {
         if (!response.ok) throw new Error(`Gagal mengambil rekomendasi kegiatan (${response.status})`)
         const result = await response.json()
+        if (signal.aborted) return
         if (result.status !== 'success' || !result.data) {
           throw new Error(result.message ?? 'Data rekomendasi tidak tersedia')
         }
@@ -135,6 +152,7 @@ function JelajahiPeta() {
       .catch((error) => {
         if (!signal.aborted) {
           console.error('Gagal ambil rekomendasi kegiatan:', error)
+          setRecommendationsError('Gagal memuat rekomendasi kegiatan.')
           setRecommendations([])
         }
       })
@@ -144,6 +162,19 @@ function JelajahiPeta() {
 
     return () => controller.abort()
   }, [state?.wilayahId, recommendationContext])
+
+  useEffect(() => {
+    if (profil?.jenis !== 'Desa' || detailDesaLoading) return undefined
+
+    const timers = [
+      window.setTimeout(() => setTahapDetailTampil(1), 0),
+      window.setTimeout(() => setTahapDetailTampil(2), 200),
+      window.setTimeout(() => setTahapDetailTampil(3), 400),
+      window.setTimeout(() => setTahapDetailTampil(4), 600),
+    ]
+
+    return () => timers.forEach((timer) => window.clearTimeout(timer))
+  }, [profil?.jenis, profil?.kodeDesa, detailDesaLoading])
 
   const toggleLapisan = (kelompok, id) => {
     setAktif((sebelumnya) => ({
@@ -177,9 +208,14 @@ function JelajahiPeta() {
       setProfilTerbuka(true)
       setPanelTerbuka(false)
       setFasilitasDesa(null)
+      setFasilitasDesaError(null)
+      setFasilitasDesaLoading(true)
       setDetailDesa(null)
+      setDetailDesaError(null)
       setDetailDesaLoading(true)
+      setTahapDetailTampil(0)
       setRecommendations(null)
+      setRecommendationsError(null)
       setRecommendationsLoading(true)
       setDetailKabupaten(null)
       setDetailKabupatenLoading(false)
@@ -189,13 +225,20 @@ function JelajahiPeta() {
         .then(async (response) => {
           if (!response.ok) throw new Error(`Gagal mengambil fasilitas desa (${response.status})`)
           const result = await response.json()
+          if (signal.aborted) return
           if (result.status !== 'success') {
             throw new Error(result.message ?? 'Data fasilitas tidak tersedia')
           }
           setFasilitasDesa(result.data)
         })
         .catch((error) => {
-          if (!signal.aborted) console.error('Gagal ambil fasilitas:', error)
+          if (!signal.aborted) {
+            console.error('Gagal ambil fasilitas:', error)
+            setFasilitasDesaError('Gagal memuat fasilitas desa.')
+          }
+        })
+        .finally(() => {
+          if (!signal.aborted) setFasilitasDesaLoading(false)
         })
 
       const context = state?.wilayahId === p.kode_desa ? recommendationContext : null
@@ -203,11 +246,15 @@ function JelajahiPeta() {
         .then(async (response) => {
           if (!response.ok) throw new Error(`Gagal mengambil detail desa (${response.status})`)
           const result = await response.json()
+          if (signal.aborted) return
           if (!result.data) throw new Error(result.message ?? 'Data detail desa tidak tersedia')
           setDetailDesa(result.data)
         })
         .catch((error) => {
-          if (!signal.aborted) console.error('Gagal ambil detail desa:', error)
+          if (!signal.aborted) {
+            console.error('Gagal ambil detail desa:', error)
+            setDetailDesaError('Gagal memuat data desa.')
+          }
         })
         .finally(() => {
           if (!signal.aborted) setDetailDesaLoading(false)
@@ -217,6 +264,7 @@ function JelajahiPeta() {
         .then(async (response) => {
           if (!response.ok) throw new Error(`Gagal mengambil rekomendasi kegiatan (${response.status})`)
           const result = await response.json()
+          if (signal.aborted) return
           if (result.status !== 'success' || !result.data) {
             throw new Error(result.message ?? 'Data rekomendasi tidak tersedia')
           }
@@ -225,6 +273,7 @@ function JelajahiPeta() {
         .catch((error) => {
           if (!signal.aborted) {
             console.error('Gagal ambil rekomendasi kegiatan:', error)
+            setRecommendationsError('Gagal memuat rekomendasi kegiatan.')
             setRecommendations([])
           }
         })
@@ -247,9 +296,14 @@ function JelajahiPeta() {
       setProfilTerbuka(true)
       setPanelTerbuka(false)
       setFasilitasDesa(null)
+      setFasilitasDesaError(null)
+      setFasilitasDesaLoading(false)
       setDetailDesa(null)
+      setDetailDesaError(null)
       setDetailDesaLoading(false)
+      setTahapDetailTampil(0)
       setRecommendations(null)
+      setRecommendationsError(null)
       setRecommendationsLoading(false)
       setDetailKabupaten(null)
       setDetailKabupatenError(null)
@@ -265,6 +319,7 @@ function JelajahiPeta() {
         .then(async (response) => {
           if (!response.ok) throw new Error(`Gagal mengambil indikator kabupaten (${response.status})`)
           const result = await response.json()
+          if (controller.signal.aborted) return
           if (result.status !== 'success' || !result.data) {
             throw new Error(result.message ?? 'Data indikator kabupaten tidak tersedia.')
           }
@@ -291,9 +346,14 @@ function JelajahiPeta() {
     const dariDesa = profil?.jenis === 'Desa'
     setProfilTerbuka(false)
     setFasilitasDesa(null)
+    setFasilitasDesaError(null)
+    setFasilitasDesaLoading(false)
     setDetailDesa(null)
+    setDetailDesaError(null)
     setDetailDesaLoading(false)
+    setTahapDetailTampil(0)
     setRecommendations(null)
+    setRecommendationsError(null)
     setRecommendationsLoading(false)
     setDetailKabupaten(null)
     setDetailKabupatenLoading(false)
@@ -313,8 +373,15 @@ function JelajahiPeta() {
     setProfilTerbuka(false)
     setTerpilihId(null)
     setFasilitasDesa(null)
+    setFasilitasDesaError(null)
+    setFasilitasDesaLoading(false)
     setDetailDesa(null)
+    setDetailDesaError(null)
     setDetailDesaLoading(false)
+    setTahapDetailTampil(0)
+    setRecommendations(null)
+    setRecommendationsError(null)
+    setRecommendationsLoading(false)
     setDetailKabupaten(null)
     setDetailKabupatenLoading(false)
     setDetailKabupatenError(null)
@@ -365,10 +432,15 @@ function JelajahiPeta() {
         <ProfilWilayah
           wilayah={profil}
           fasilitas={fasilitasDesa}
+          fasilitasLoading={fasilitasDesaLoading}
+          fasilitasError={fasilitasDesaError}
           detailDesa={detailDesa}
           detailDesaLoading={detailDesaLoading}
+          detailDesaError={detailDesaError}
+          tahapTampil={tahapDetailTampil}
           recommendations={recommendations}
           recommendationsLoading={recommendationsLoading}
+          recommendationsError={recommendationsError}
           detailKabupaten={detailKabupaten}
           detailKabupatenLoading={detailKabupatenLoading}
           detailKabupatenError={detailKabupatenError}

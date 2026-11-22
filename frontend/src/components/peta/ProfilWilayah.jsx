@@ -119,6 +119,31 @@ const CSS_PROFIL = `
 }
 .muncul { animation: muncul-naik 0.55s cubic-bezier(0.22, 1, 0.36, 1) both; }
 
+@keyframes titik-memuat {
+  0%, 80%, 100% { opacity: 0.25; transform: translateY(0); }
+  40% { opacity: 1; transform: translateY(-4px); }
+}
+.loading-dots-card {
+  display: flex;
+  min-height: 56px;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  border: 1px solid #e5e7eb;
+  border-radius: 0.75rem;
+  background: rgba(255, 255, 255, 0.7);
+  color: #355f3a;
+}
+.loading-dot { animation: titik-memuat 0.9s ease-in-out infinite; }
+.loading-dot:nth-child(2) { animation-delay: 0.15s; }
+.loading-dot:nth-child(3) { animation-delay: 0.3s; }
+
+@keyframes bagian-memudar {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+.bagian-fade-in { animation: bagian-memudar 0.2s ease-out both; }
+
 /* Batang keparahan tumbuh dari kiri */
 @keyframes bar-tumbuh {
   from { transform: scaleX(0); }
@@ -138,7 +163,8 @@ const CSS_PROFIL = `
 .kartu-hidup:hover { transform: translateY(-2px); box-shadow: 0 10px 22px -10px rgba(0, 0, 0, 0.25); }
 
 @media (prefers-reduced-motion: reduce) {
-  .gauge-svg, .gauge-arc, .gauge-angka, .badge-pop, .muncul, .bar-isi, .dekor-melayang {
+  .gauge-svg, .gauge-arc, .gauge-angka, .badge-pop, .muncul, .bar-isi, .dekor-melayang,
+  .loading-dot, .bagian-fade-in {
     animation: none !important;
   }
 }
@@ -189,19 +215,43 @@ function Kosong({ children }) {
   )
 }
 
+function LoadingDots({ label }) {
+  return (
+    <div className="loading-dots-card" role="status" aria-label={label}>
+      <span className="loading-dot text-3xl font-bold leading-none" aria-hidden="true">.</span>
+      <span className="loading-dot text-3xl font-bold leading-none" aria-hidden="true">.</span>
+      <span className="loading-dot text-3xl font-bold leading-none" aria-hidden="true">.</span>
+    </div>
+  )
+}
+
+function PesanGagal({ children }) {
+  return (
+    <p role="alert" className="rounded-xl border border-red-200 bg-red-50 px-3 py-3 text-xs text-red-700">
+      {children}
+    </p>
+  )
+}
+
 function ProfilWilayah({
   wilayah,
   fasilitas,
+  fasilitasLoading,
+  fasilitasError,
   detailDesa,
   detailDesaLoading,
+  detailDesaError,
+  tahapTampil,
   recommendations,
   recommendationsLoading,
+  recommendationsError,
   detailKabupaten,
   detailKabupatenLoading,
   detailKabupatenError,
   onClose,
 }) {
   const isDesa = wilayah?.jenis === 'Desa'
+  const rekomendasiTampil = isDesa && tahapTampil >= 4 && !recommendationsLoading
 
   const profilTampil =
     isDesa && detailDesa
@@ -340,7 +390,11 @@ function ProfilWilayah({
           {isDesa && (
             <section className="muncul" style={tunda(320)}>
               <Judul ikon={MapPin}>Fasilitas Desa</Judul>
-              {fasilitas ? (
+              {fasilitasLoading ? (
+                <LoadingDots label="Memuat fasilitas desa" />
+              ) : fasilitasError ? (
+                <PesanGagal>{fasilitasError}</PesanGagal>
+              ) : fasilitas ? (
                 <>
                   <div className="grid grid-cols-2 gap-3">
                     <div className="kartu-hidup flex items-center gap-3 rounded-2xl border border-gray-200 bg-white p-3 shadow-sm">
@@ -400,56 +454,65 @@ function ProfilWilayah({
 
               <div className="kartu-hidup mt-3 rounded-2xl border border-gray-200 bg-white p-3 shadow-sm">
                 <p className="mb-2 text-xs font-semibold text-gray-700">Jarak fasilitas terdekat</p>
-                <div className="grid grid-cols-2 gap-3">
-                  <div className="rounded-xl bg-blue-50 px-3 py-2">
-                    <p className="text-[10px] uppercase tracking-wide text-gray-500">Pendidikan</p>
-                    <div className="mt-0.5 flex flex-wrap items-center gap-x-1.5 gap-y-0.5">
-                      <p className="text-sm font-bold text-gray-800">
-                        {detailDesaLoading ? 'Memuat...' : formatJarak(detailDesa?.jarakSekolahKm)}
-                      </p>
-                      {!detailDesaLoading && indikatorPerhatian.includes('pendidikan') && (
-                        <span
-                          className="inline-flex animate-pulse items-center gap-0.5 text-[10px] font-semibold text-red-600"
-                          aria-label="Perlu perhatian: jarak sekolah lebih dari 1 km"
-                          title="Jarak sekolah lebih dari 1 km"
-                        >
-                          <CircleAlert size={13} aria-hidden="true" />
-                          Perlu perhatian!
-                        </span>
-                      )}
+                {detailDesaLoading || tahapTampil < 1 ? (
+                  <LoadingDots label="Memuat jarak fasilitas terdekat" />
+                ) : detailDesaError ? (
+                  <PesanGagal>Gagal memuat jarak fasilitas.</PesanGagal>
+                ) : (
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="rounded-xl bg-blue-50 px-3 py-2">
+                      <p className="text-[10px] uppercase tracking-wide text-gray-500">Pendidikan</p>
+                      <div className="mt-0.5 flex flex-wrap items-center gap-x-1.5 gap-y-0.5">
+                        <p className="text-sm font-bold text-gray-800">
+                          {formatJarak(detailDesa?.jarakSekolahKm)}
+                        </p>
+                        {indikatorPerhatian.includes('pendidikan') && (
+                          <span
+                            className="inline-flex animate-pulse items-center gap-0.5 text-[10px] font-semibold text-red-600"
+                            aria-label="Perlu perhatian: jarak sekolah lebih dari 1 km"
+                            title="Jarak sekolah lebih dari 1 km"
+                          >
+                            <CircleAlert size={13} aria-hidden="true" />
+                            Perlu perhatian!
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-[10px] text-gray-500">sekolah terdekat</p>
                     </div>
-                    <p className="text-[10px] text-gray-500">sekolah terdekat</p>
-                  </div>
-                  <div className="rounded-xl bg-red-50 px-3 py-2">
-                    <p className="text-[10px] uppercase tracking-wide text-gray-500">Kesehatan</p>
-                    <div className="mt-0.5 flex flex-wrap items-center gap-x-1.5 gap-y-0.5">
-                      <p className="text-sm font-bold text-gray-800">
-                        {detailDesaLoading ? 'Memuat...' : formatJarak(detailDesa?.jarakFaskesKm)}
+                    <div className="rounded-xl bg-red-50 px-3 py-2">
+                      <p className="text-[10px] uppercase tracking-wide text-gray-500">Kesehatan</p>
+                      <div className="mt-0.5 flex flex-wrap items-center gap-x-1.5 gap-y-0.5">
+                        <p className="text-sm font-bold text-gray-800">
+                          {formatJarak(detailDesa?.jarakFaskesKm)}
+                        </p>
+                        {indikatorPerhatian.includes('kesehatan') && (
+                          <span
+                            className="inline-flex animate-pulse items-center gap-0.5 text-[10px] font-semibold text-red-600"
+                            aria-label="Perlu perhatian: jarak fasilitas kesehatan lebih dari 3 km"
+                            title="Jarak fasilitas kesehatan lebih dari 3 km"
+                          >
+                            <CircleAlert size={13} aria-hidden="true" />
+                            Perlu perhatian!
+                          </span>
+                        )}
+                      </div>
+                      <p className="truncate text-[10px] text-gray-500">
+                        {detailDesa?.faskesTerdekat
+                          ? `${detailDesa.faskesTerdekat}${detailDesa.tipeFaskesTerdekat ? ` · ${detailDesa.tipeFaskesTerdekat}` : ''}`
+                          : 'faskes terdekat'}
                       </p>
-                      {!detailDesaLoading && indikatorPerhatian.includes('kesehatan') && (
-                        <span
-                          className="inline-flex animate-pulse items-center gap-0.5 text-[10px] font-semibold text-red-600"
-                          aria-label="Perlu perhatian: jarak fasilitas kesehatan lebih dari 3 km"
-                          title="Jarak fasilitas kesehatan lebih dari 3 km"
-                        >
-                          <CircleAlert size={13} aria-hidden="true" />
-                          Perlu perhatian!
-                        </span>
-                      )}
                     </div>
-                    <p className="truncate text-[10px] text-gray-500">
-                      {detailDesa?.faskesTerdekat
-                        ? `${detailDesa.faskesTerdekat}${detailDesa.tipeFaskesTerdekat ? ` · ${detailDesa.tipeFaskesTerdekat}` : ''}`
-                        : 'faskes terdekat'}
-                    </p>
                   </div>
-                </div>
+                )}
               </div>
             </section>
           )}
 
           {/* TINGKAT KEPARAHAN PER BIDANG */}
-          <section className="muncul" style={tunda(isDesa ? 420 : 320)}>
+          <section
+            className={isDesa ? (tahapTampil >= 2 ? 'bagian-fade-in' : '') : 'muncul'}
+            style={!isDesa ? tunda(320) : undefined}
+          >
             <Judul ikon={Activity}>Tingkat Keparahan</Judul>
 
             {!isDesa && detailKabupaten && (
@@ -462,7 +525,15 @@ function ProfilWilayah({
               </p>
             )}
 
-            {adaIsi(profilTampil?.kesenjangan) ? (
+            {isDesa && (detailDesaLoading || tahapTampil < 2) ? (
+              <LoadingDots label="Memuat tingkat keparahan" />
+            ) : isDesa && detailDesaError ? (
+              <PesanGagal>Gagal memuat tingkat keparahan.</PesanGagal>
+            ) : !isDesa && detailKabupatenLoading ? (
+              <LoadingDots label="Memuat tingkat keparahan" />
+            ) : !isDesa && detailKabupatenError ? (
+              <PesanGagal>{detailKabupatenError}</PesanGagal>
+            ) : adaIsi(profilTampil?.kesenjangan) ? (
               <div className="kartu-hidup rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
                 <p className="mb-3 text-[11px] leading-snug text-gray-500">
                   {isDesa
@@ -517,17 +588,19 @@ function ProfilWilayah({
               <Kosong>
                 {isDesa
                   ? 'Data tingkat keparahan tingkat desa belum tersedia.'
-                  : detailKabupatenLoading
-                    ? 'Menghitung tingkat keparahan kabupaten...'
-                    : detailKabupatenError ?? 'Data tingkat keparahan belum tersedia.'}
+                  : 'Data tingkat keparahan belum tersedia.'}
               </Kosong>
             )}
           </section>
 
           {isDesa && (
-            <section className="muncul" style={tunda(520)}>
+            <section className={tahapTampil >= 3 ? 'bagian-fade-in' : ''}>
               <Judul ikon={Lightbulb}>Potensi Wilayah</Judul>
-              {adaIsi(profilTampil?.potensi) ? (
+              {detailDesaLoading || tahapTampil < 3 ? (
+                <LoadingDots label="Memuat potensi wilayah" />
+              ) : detailDesaError ? (
+                <PesanGagal>Gagal memuat potensi wilayah.</PesanGagal>
+              ) : adaIsi(profilTampil?.potensi) ? (
                 <ul className="space-y-2">
                   {profilTampil.potensi.map((teks, i) => (
                     <li
@@ -542,8 +615,6 @@ function ProfilWilayah({
                     </li>
                   ))}
                 </ul>
-              ) : detailDesaLoading ? (
-                <Kosong>Memuat potensi wilayah...</Kosong>
               ) : (
                 <Kosong>Potensi wilayah belum tersedia.</Kosong>
               )}
@@ -551,17 +622,12 @@ function ProfilWilayah({
           )}
 
           {isDesa && (
-            <section className="muncul" style={tunda(620)}>
+            <section className={rekomendasiTampil ? 'bagian-fade-in' : ''}>
               <Judul ikon={Lightbulb}>Rekomendasi Kegiatan</Judul>
-              {recommendationsLoading ? (
-                <div className="space-y-2" aria-label="Memuat rekomendasi kegiatan">
-                  {[0, 1, 2].map((item) => (
-                    <div
-                      key={item}
-                      className="h-24 animate-pulse rounded-xl border border-gray-200 bg-white/70"
-                    />
-                  ))}
-                </div>
+              {!rekomendasiTampil ? (
+                <LoadingDots label="Memuat rekomendasi kegiatan" />
+              ) : recommendationsError ? (
+                <PesanGagal>{recommendationsError}</PesanGagal>
               ) : adaIsi(recommendations) ? (
                 <div className="space-y-2">
                   {recommendations.map((item, index) => (
