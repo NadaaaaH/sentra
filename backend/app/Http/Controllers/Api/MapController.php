@@ -256,13 +256,21 @@ class MapController extends Controller
                     ->whereRaw('ST_Contains(?, sekolah_point.geom)', [$desa->geom])
                     ->select('id', 'nama', 'jenjang', 'lat', 'lon')
                     ->get();
+                $detailFaskes = $faskes
+                    ->map(static fn (object $item): array => (array) $item)
+                    ->values()
+                    ->all();
+                $detailSekolah = $sekolah
+                    ->map(static fn (object $item): array => (array) $item)
+                    ->values()
+                    ->all();
 
                 return [
                     'desa' => $desa->nama_desa,
-                    'total_faskes' => $faskes->count(),
-                    'total_sekolah' => $sekolah->count(),
-                    'detail_faskes' => $faskes,
-                    'detail_sekolah' => $sekolah,
+                    'total_faskes' => count($detailFaskes),
+                    'total_sekolah' => count($detailSekolah),
+                    'detail_faskes' => $detailFaskes,
+                    'detail_sekolah' => $detailSekolah,
                 ];
             },
         );

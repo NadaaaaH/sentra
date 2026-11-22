@@ -4,16 +4,22 @@ namespace Tests\Feature;
 
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Http\Client\Request;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Schema;
 use Tests\TestCase;
 
 class SmartMatchingTest extends TestCase
 {
+    private string $rankCachePath;
+
     protected function setUp(): void
     {
         parent::setUp();
+        $this->rankCachePath = sys_get_temp_dir().DIRECTORY_SEPARATOR.'sentra-sm-rank-'.bin2hex(random_bytes(8));
+        config(['cache.stores.file.path' => $this->rankCachePath]);
 
         Schema::create('kabupaten', function (Blueprint $table): void {
             $table->string('kode_kab')->primary();
@@ -63,7 +69,7 @@ class SmartMatchingTest extends TestCase
 
         $pdo = DB::connection()->getPdo();
         $pdo->sqliteCreateFunction('ST_Centroid', static fn (string $geometry): string => $geometry);
-        $pdo->sqliteCreateFunction('ST_Distance', static function (string $first, string $second): float {
+        $distanceInMeters = static function (string $first, string $second): float {
             preg_match('/^POINT\(([-0-9.]+) ([-0-9.]+)\)$/', $first, $firstPoint);
             preg_match('/^POINT\(([-0-9.]+) ([-0-9.]+)\)$/', $second, $secondPoint);
 
@@ -80,7 +86,14 @@ class SmartMatchingTest extends TestCase
                 + cos($firstLatitude) * cos($secondLatitude) * sin($longitudeDifference / 2) ** 2;
 
             return 2 * $earthRadiusMeters * asin(min(1, sqrt($haversine)));
-        });
+        };
+        $pdo->sqliteCreateFunction('ST_Distance', $distanceInMeters);
+        $pdo->sqliteCreateFunction(
+            'ST_DWithin',
+            static fn (string $first, string $second, float $radiusMeters): int => (
+                $distanceInMeters($first, $second) <= $radiusMeters ? 1 : 0
+            ),
+        );
 
         DB::table('kabupaten')->insert([
             'kode_kab' => '3301',
@@ -116,6 +129,13 @@ class SmartMatchingTest extends TestCase
             'required_people' => 4,
             'duration_days' => 14,
         ]);
+    }
+
+    protected function tearDown(): void
+    {
+        File::deleteDirectory($this->rankCachePath);
+
+        parent::tearDown();
     }
 
     public function test_it_returns_database_matches_and_lowers_score_when_budget_is_below_reference(): void
@@ -191,6 +211,105 @@ class SmartMatchingTest extends TestCase
 
         Http::assertSent(fn (Request $request): bool => $request->hasHeader('x-goog-api-key', 'test-key')
             && $request['generationConfig']['responseMimeType'] === 'application/json');
+    }
+
+    public function test_it_returns_fallback_matches_when_gemini_fails(): void
+    {
+        config([
+            'services.gemini.key' => 'test-key',
+            'services.gemini.url' => 'https://gemini.test/generate',
+        ]);
+        Http::fake([
+            'https://gemini.test/generate' => Http::response(['error' => 'unavailable'], 503),
+        ]);
+
+        $this->postJson('/api/v1/smart-matching', [
+            'bidang' => 'kesehatan',
+            'anggaran' => 20000000,
+            'pelaksana' => 4,
+            'durasi' => 14,
+        ])
+            ->assertOk()
+            ->assertJsonPath('data.0.region_id', '3301012001')
+            ->assertJsonPath('data.0.match_score', 90);
+
+        Http::assertSentCount(1);
+    }
+
+    public function test_it_caches_gemini_explanations_per_region_across_offset_changes(): void
+    {
+        config([
+            'services.gemini.key' => 'test-key',
+            'services.gemini.url' => 'https://gemini.test/generate',
+        ]);
+        for ($village = 2; $village <= 7; $village++) {
+            $code = '33010120'.str_pad((string) $village, 2, '0', STR_PAD_LEFT);
+            $this->addHealthVillage($code, 'POINT(110 -7)');
+        }
+
+        $payload = [
+            'bidang' => 'kesehatan',
+            'anggaran' => 20000000,
+            'pelaksana' => 4,
+            'durasi' => 14,
+            'offset' => 0,
+            'limit' => 2,
+        ];
+        $rankingPayload = $payload;
+        unset($rankingPayload['offset'], $rankingPayload['limit']);
+        ksort($rankingPayload);
+        Cache::store('file')->forget(
+            'sm:rank:'.md5(json_encode($rankingPayload, JSON_THROW_ON_ERROR)),
+        );
+
+        $promptedRegionIds = [];
+        Http::fake([
+            'https://gemini.test/generate' => function (Request $request) use (&$promptedRegionIds) {
+                preg_match_all(
+                    '/"region_id":"(33010120[0-9]+)"/',
+                    $request['contents'][0]['parts'][0]['text'],
+                    $matches,
+                );
+                $promptedRegionIds[] = $matches[1];
+
+                return Http::response([
+                    'candidates' => [[
+                        'content' => [
+                            'parts' => [[
+                                'text' => json_encode([
+                                    'matches' => array_map(
+                                        static fn (string $regionId): array => [
+                                            'region_id' => $regionId,
+                                            'match_reason' => 'Kebutuhan kesehatan terukur.',
+                                            'recommended_action' => 'Lakukan layanan kesehatan keliling.',
+                                        ],
+                                        $matches[1],
+                                    ),
+                                ]),
+                            ]],
+                        ],
+                    ]],
+                ]);
+            },
+        ]);
+
+        $this->postJson('/api/v1/smart-matching', $payload)
+            ->assertOk()
+            ->assertJsonCount(2, 'data')
+            ->assertJsonPath('data.0.match_reason', 'Kebutuhan kesehatan terukur.');
+
+        $this->assertCount(2, $promptedRegionIds[0]);
+
+        $this->postJson('/api/v1/smart-matching', [
+            ...$payload,
+            'offset' => 1,
+            'limit' => 1,
+        ])
+            ->assertOk()
+            ->assertJsonCount(1, 'data')
+            ->assertJsonPath('data.0.match_reason', 'Kebutuhan kesehatan terukur.');
+
+        Http::assertSentCount(1);
     }
 
     public function test_it_rejects_program_categories_outside_the_supported_list(): void
@@ -319,6 +438,27 @@ class SmartMatchingTest extends TestCase
             ->assertJsonCount(5, 'data')
             ->assertJsonPath('meta.total', 7)
             ->assertJsonPath('meta.has_more', true);
+        $rankingPayload = $baseInput;
+        ksort($rankingPayload);
+        $ranking = Cache::store('file')->get(
+            'sm:rank:'.md5(json_encode($rankingPayload, JSON_THROW_ON_ERROR)),
+        );
+        $this->assertIsArray($ranking);
+        $this->assertSame(true, $ranking['nearby_found']);
+        $this->assertIsArray($ranking['requirements']);
+        $this->assertSame([], array_filter(
+            $ranking['requirements'],
+            static fn (mixed $value): bool => ! is_scalar($value) && $value !== null,
+        ));
+        $this->assertCount(7, $ranking['items']);
+        foreach ($ranking['items'] as $item) {
+            $this->assertSame(['region_id', 'match_score', 'distance_km'], array_keys($item));
+            $this->assertSame([], array_filter(
+                $item,
+                static fn (mixed $value): bool => ! is_scalar($value) && $value !== null,
+            ));
+        }
+
         $lastPage = $this->postJson('/api/v1/smart-matching', [
             ...$baseInput,
             'offset' => 5,
@@ -408,6 +548,39 @@ class SmartMatchingTest extends TestCase
             ->assertJsonPath('data.0.type', 'desa')
             ->assertJsonPath('data.0.code', '3301012001')
             ->assertJsonPath('data.0.label', 'Tambakreja');
+    }
+
+    public function test_categories_endpoint_returns_the_same_response_from_cache(): void
+    {
+        Cache::forget('sm:categories');
+
+        $coldResponse = $this->getJson('/api/v1/smart-matching/categories')
+            ->assertOk();
+        $cachedCategories = Cache::get('sm:categories');
+        $this->assertIsArray($cachedCategories);
+        $this->assertIsArray($cachedCategories[0]);
+
+        $warmResponse = $this->getJson('/api/v1/smart-matching/categories')
+            ->assertOk();
+
+        $this->assertSame($coldResponse->json(), $warmResponse->json());
+    }
+
+    public function test_location_search_endpoint_returns_the_same_response_from_cache(): void
+    {
+        $cacheKey = 'sm:locations:'.md5(mb_strtolower(trim('Tambak')));
+        Cache::forget($cacheKey);
+
+        $coldResponse = $this->getJson('/api/v1/smart-matching/locations?q=Tambak')
+            ->assertOk();
+        $cachedLocations = Cache::get($cacheKey);
+        $this->assertIsArray($cachedLocations);
+        $this->assertIsArray($cachedLocations[0]);
+
+        $warmResponse = $this->getJson('/api/v1/smart-matching/locations?q=Tambak')
+            ->assertOk();
+
+        $this->assertSame($coldResponse->json(), $warmResponse->json());
     }
 
     public function test_it_only_lists_categories_with_valid_activity_ranges(): void

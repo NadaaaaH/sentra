@@ -34,14 +34,15 @@ class ActivityRecommendationService
         );
 
         $cached = Cache::get($cacheKey);
-        if (is_array($cached) && ($cached['ai_available'] ?? false) === true) {
+        if (is_array($cached)) {
             return $cached;
         }
 
         $result = $this->generateRecommendations($desa, $context);
-        if ($result['ai_available']) {
-            Cache::put($cacheKey, $result, now()->addHours(6));
-        }
+        $expiresAt = $result['ai_available']
+            ? now()->addHours(6)
+            : now()->addMinutes(5);
+        Cache::put($cacheKey, $result, $expiresAt);
 
         return $result;
     }

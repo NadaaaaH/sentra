@@ -4,9 +4,12 @@ namespace App\Services;
 
 use App\Models\Activity;
 use App\Models\Desa;
+use App\Models\Kabupaten;
+use App\Models\Kecamatan;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\RequestException;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
@@ -27,81 +30,138 @@ class SmartMatchingService
 
     public function availableProgramCategories(): array
     {
-        $categories = Activity::query()
-            ->whereIn('category', array_keys(self::CATEGORY_LABELS))
-            ->where('min_budget', '>', 0)
-            ->whereColumn('max_budget', '>=', 'min_budget')
-            ->where('required_people', '>', 0)
-            ->where('duration_days', '>', 0)
-            ->distinct()
-            ->orderBy('category')
-            ->pluck('category');
+        return Cache::remember('sm:categories', now()->addHour(), function (): array {
+            $categories = Activity::query()
+                ->whereIn('category', array_keys(self::CATEGORY_LABELS))
+                ->where('min_budget', '>', 0)
+                ->whereColumn('max_budget', '>=', 'min_budget')
+                ->where('required_people', '>', 0)
+                ->where('duration_days', '>', 0)
+                ->distinct()
+                ->orderBy('category')
+                ->pluck('category');
 
-        return $categories
-            ->filter(fn (string $category): bool => $this->hasIndicatorData($category))
-            ->map(fn (string $category): array => [
-                'value' => $category,
-                'label' => self::CATEGORY_LABELS[$category],
-            ])
-            ->values()
-            ->all();
+            return $categories
+                ->filter(fn (string $category): bool => $this->hasIndicatorData($category))
+                ->map(fn (string $category): array => [
+                    'value' => $category,
+                    'label' => self::CATEGORY_LABELS[$category],
+                ])
+                ->values()
+                ->all();
+        });
     }
 
     public function searchLocations(string $search): array
     {
-        $keyword = '%'.mb_strtolower(trim($search)).'%';
+        $normalizedSearch = mb_strtolower(trim($search));
+        $searchLocations = function () use ($normalizedSearch): array {
+            $keyword = '%'.$normalizedSearch.'%';
 
-        $kabupaten = DB::table('kabupaten')
-            ->whereRaw('LOWER(nama_kabupaten) LIKE ?', [$keyword])
-            ->orderBy('nama_kabupaten')
-            ->limit(5)
-            ->get(['kode_kab', 'nama_kabupaten', 'tipe'])
-            ->map(fn (object $item): array => [
-                'type' => 'kabupaten',
-                'code' => (string) $item->kode_kab,
-                'kindLabel' => $item->tipe === 'kota' ? 'Kota' : 'Kabupaten',
-                'name' => $item->nama_kabupaten,
-                'label' => ($item->tipe === 'kota' ? 'Kota ' : 'Kabupaten ').$item->nama_kabupaten,
-            ]);
+            $kabupaten = DB::table('kabupaten')
+                ->whereRaw('LOWER(nama_kabupaten) LIKE ?', [$keyword])
+                ->orderBy('nama_kabupaten')
+                ->limit(5)
+                ->get(['kode_kab', 'nama_kabupaten', 'tipe'])
+                ->map(fn (object $item): array => [
+                    'type' => 'kabupaten',
+                    'code' => (string) $item->kode_kab,
+                    'kindLabel' => $item->tipe === 'kota' ? 'Kota' : 'Kabupaten',
+                    'name' => $item->nama_kabupaten,
+                    'label' => ($item->tipe === 'kota' ? 'Kota ' : 'Kabupaten ').$item->nama_kabupaten,
+                ]);
 
-        $desa = DB::table('desa')
-            ->join('desa_geom', 'desa.kode_desa', '=', 'desa_geom.kode_desa')
-            ->join('kecamatan', 'desa.kode_kec', '=', 'kecamatan.kode_kec')
-            ->join('kabupaten', 'kecamatan.kode_kab', '=', 'kabupaten.kode_kab')
-            ->whereRaw('LOWER(desa.nama_desa) LIKE ?', [$keyword])
-            ->orderBy('desa.nama_desa')
-            ->limit(10)
-            ->get([
-                'desa.kode_desa',
-                'desa.nama_desa',
-                'desa.unit_type',
-                'kecamatan.nama_kecamatan',
-                'kabupaten.nama_kabupaten',
-            ])
-            ->map(fn (object $item): array => [
-                'type' => 'desa',
-                'code' => (string) $item->kode_desa,
-                'kindLabel' => strtolower((string) $item->unit_type) === 'kelurahan'
-                    ? 'Kelurahan'
-                    : 'Desa',
-                'name' => $item->nama_desa,
-                'label' => mb_convert_case($item->nama_desa, MB_CASE_TITLE, 'UTF-8'),
-                'subtitle' => $item->nama_kecamatan.', '.$item->nama_kabupaten,
-            ]);
+            $desa = DB::table('desa')
+                ->join('desa_geom', 'desa.kode_desa', '=', 'desa_geom.kode_desa')
+                ->join('kecamatan', 'desa.kode_kec', '=', 'kecamatan.kode_kec')
+                ->join('kabupaten', 'kecamatan.kode_kab', '=', 'kabupaten.kode_kab')
+                ->whereRaw('LOWER(desa.nama_desa) LIKE ?', [$keyword])
+                ->orderBy('desa.nama_desa')
+                ->limit(10)
+                ->get([
+                    'desa.kode_desa',
+                    'desa.nama_desa',
+                    'desa.unit_type',
+                    'kecamatan.nama_kecamatan',
+                    'kabupaten.nama_kabupaten',
+                ])
+                ->map(fn (object $item): array => [
+                    'type' => 'desa',
+                    'code' => (string) $item->kode_desa,
+                    'kindLabel' => strtolower((string) $item->unit_type) === 'kelurahan'
+                        ? 'Kelurahan'
+                        : 'Desa',
+                    'name' => $item->nama_desa,
+                    'label' => mb_convert_case($item->nama_desa, MB_CASE_TITLE, 'UTF-8'),
+                    'subtitle' => $item->nama_kecamatan.', '.$item->nama_kabupaten,
+                ]);
 
-        return $kabupaten->concat($desa)->values()->all();
+            return $kabupaten->concat($desa)->values()->all();
+        };
+
+        if (mb_strlen($normalizedSearch) < 2) {
+            return $searchLocations();
+        }
+
+        return Cache::remember(
+            'sm:locations:'.md5($normalizedSearch),
+            now()->addMinutes(15),
+            $searchLocations,
+        );
     }
 
     public function processSmartMatching(array $input): array
     {
         $locationType = $input['location_type'] ?? null;
-        $locationCode = $input['location_code'] ?? null;
         $radiusKm = (float) ($input['radius_km'] ?? self::DEFAULT_RADIUS_KM);
         $offset = (int) ($input['offset'] ?? 0);
         $limit = (int) ($input['limit'] ?? 5);
 
-        $activities = $this->programActivities($input['bidang']);
-        if ($activities->isEmpty()) {
+        $rankingPayload = $input;
+        unset($rankingPayload['offset'], $rankingPayload['limit']);
+        ksort($rankingPayload);
+
+        $ranking = Cache::store('file')->remember(
+            'sm:rank:'.md5(json_encode($rankingPayload, JSON_THROW_ON_ERROR)),
+            now()->addMinutes(15),
+            function () use ($input, $locationType, $radiusKm): array {
+                $activities = $this->programActivities($input['bidang']);
+                if ($activities->isEmpty()) {
+                    return [
+                        'status' => 'no_activities',
+                        'nearby_found' => true,
+                        'requirements' => [],
+                        'items' => [],
+                    ];
+                }
+
+                $requirements = $this->closestActivity($activities, $input);
+                $ranked = $this->rankCandidates(
+                    $input,
+                    $requirements,
+                    $locationType,
+                    $radiusKm,
+                );
+
+                return [
+                    'status' => 'ready',
+                    'nearby_found' => $ranked['nearby_found'],
+                    'requirements' => [
+                        'id' => $requirements->id,
+                        'title' => $requirements->title,
+                        'category' => $requirements->category,
+                        'description' => $requirements->description,
+                        'min_budget' => $requirements->min_budget,
+                        'max_budget' => $requirements->max_budget,
+                        'required_people' => $requirements->required_people,
+                        'duration_days' => $requirements->duration_days,
+                    ],
+                    'items' => $ranked['items'],
+                ];
+            },
+        );
+
+        if ($ranking['status'] === 'no_activities') {
             return [
                 'matches' => [],
                 'total' => 0,
@@ -110,90 +170,23 @@ class SmartMatchingService
             ];
         }
 
-        $requirements = $this->closestActivity($activities, $input);
-        $nearbyDistances = collect();
-        if ($locationType === 'desa') {
-            $nearbyDistances = $this->nearbyVillageDistances((string) $locationCode, $radiusKm);
+        $requirements = new Activity();
+        $requirements->setRawAttributes($ranking['requirements']);
 
-            if ($nearbyDistances->isEmpty()) {
-                return [
-                    'matches' => [],
-                    'total' => 0,
-                    'has_more' => false,
-                    'message' => sprintf(
-                        'Tidak ada desa dalam radius %s km dari lokasi yang dipilih.',
-                        rtrim(rtrim(number_format($radiusKm, 1, ',', '.'), '0'), ','),
-                    ),
-                ];
-            }
+        if (! $ranking['nearby_found']) {
+            return [
+                'matches' => [],
+                'total' => 0,
+                'has_more' => false,
+                'message' => sprintf(
+                    'Tidak ada desa dalam radius %s km dari lokasi yang dipilih.',
+                    rtrim(rtrim(number_format($radiusKm, 1, ',', '.'), '0'), ','),
+                ),
+            ];
         }
 
-        $query = Desa::query()
-            ->select([
-                'kode_desa',
-                'kode_kec',
-                'nama_desa',
-                'unit_type',
-                'iks_2024',
-                'ike_2024',
-                'ikl_2024',
-                'jarak_sekolah_resmi_km',
-                'jarak_faskes_fix_km',
-            ])
-            ->with([
-                'kecamatan:kode_kec,kode_kab,nama_kecamatan',
-                'kecamatan.kabupaten:kode_kab,nama_kabupaten,akses_air_minum_persen,akses_internet_layak_persen',
-            ]);
-
-        if ($locationType === 'desa') {
-            $query->whereIn('kode_desa', $nearbyDistances->keys());
-        } elseif ($locationType === 'kabupaten') {
-            $query->whereHas(
-                'kecamatan',
-                fn ($query) => $query->where('kode_kab', $locationCode),
-            );
-        }
-
-        match ($input['bidang']) {
-            'kesehatan' => $query->where(function ($query): void {
-                $query->whereNotNull('iks_2024')
-                    ->orWhereNotNull('jarak_faskes_fix_km');
-            }),
-            'pendidikan' => $query->whereNotNull('jarak_sekolah_resmi_km'),
-            'internet' => $query->whereHas(
-                'kecamatan.kabupaten',
-                fn ($query) => $query->whereNotNull('akses_internet_layak_persen'),
-            ),
-            'infrastruktur' => $query->where(function ($query): void {
-                $query->whereNotNull('ikl_2024')
-                    ->orWhereHas(
-                        'kecamatan.kabupaten',
-                        fn ($query) => $query->whereNotNull('akses_air_minum_persen'),
-                    );
-            }),
-            'ekonomi' => $query->whereNotNull('ike_2024'),
-        };
-
-        $candidates = $query
-            ->get()
-            ->map(fn (Desa $desa): ?array => $this->scoreCandidate(
-                $desa,
-                $input,
-                $requirements,
-                $locationType === 'desa'
-                    ? (float) $nearbyDistances[$desa->kode_desa]->distance_km
-                    : null,
-                $locationType,
-                $radiusKm,
-            ))
-            ->filter()
-            ->sort(fn (array $first, array $second): int => (
-                ($second['match_score'] <=> $first['match_score'])
-                ?: strcmp($first['region_id'], $second['region_id'])
-            ))
-            ->values();
-
-        if ($candidates === []) {
+        $ranked = $ranking['items'];
+        if ($ranked === []) {
             return [
                 'matches' => [],
                 'total' => 0,
@@ -202,8 +195,15 @@ class SmartMatchingService
             ];
         }
 
-        $total = $candidates->count();
-        $page = $candidates->slice($offset, $limit)->values()->all();
+        $total = count($ranked);
+        $pageRanking = array_slice($ranked, $offset, $limit);
+        $page = $this->loadCandidatePage(
+            $pageRanking,
+            $input,
+            $requirements,
+            $locationType,
+            $radiusKm,
+        );
 
         return [
             'matches' => $this->addAiExplanations($input, $requirements, $page),
@@ -220,23 +220,230 @@ class SmartMatchingService
         ];
     }
 
+    private function rankCandidates(
+        array $input,
+        Activity $requirements,
+        ?string $locationType,
+        float $radiusKm,
+    ): array {
+        $nearbyDistances = collect();
+        if ($locationType === 'desa') {
+            $nearbyDistances = $this->nearbyVillageDistances(
+                (string) $input['location_code'],
+                $radiusKm,
+            );
+
+            if ($nearbyDistances->isEmpty()) {
+                return ['nearby_found' => false, 'items' => []];
+            }
+        }
+
+        $query = DB::table('desa')
+            ->leftJoin('kecamatan as matching_kecamatan', 'desa.kode_kec', '=', 'matching_kecamatan.kode_kec')
+            ->leftJoin('kabupaten as matching_kabupaten', 'matching_kecamatan.kode_kab', '=', 'matching_kabupaten.kode_kab')
+            ->select([
+                'desa.kode_desa',
+                'desa.iks_2024',
+                'desa.ike_2024',
+                'desa.ikl_2024',
+                'desa.jarak_sekolah_resmi_km',
+                'desa.jarak_faskes_fix_km',
+                'matching_kabupaten.akses_air_minum_persen',
+                'matching_kabupaten.akses_internet_layak_persen',
+            ]);
+
+        if ($locationType === 'desa') {
+            $query->whereIn('desa.kode_desa', $nearbyDistances->keys());
+        } elseif ($locationType === 'kabupaten') {
+            $query->where('matching_kecamatan.kode_kab', $input['location_code']);
+        }
+
+        match ($input['bidang']) {
+            'kesehatan' => $query->where(function ($query): void {
+                $query->whereNotNull('desa.iks_2024')
+                    ->orWhereNotNull('desa.jarak_faskes_fix_km');
+            }),
+            'pendidikan' => $query->whereNotNull('desa.jarak_sekolah_resmi_km'),
+            'internet' => $query->whereNotNull('matching_kabupaten.akses_internet_layak_persen'),
+            'infrastruktur' => $query->where(function ($query): void {
+                $query->whereNotNull('desa.ikl_2024')
+                    ->orWhereNotNull('matching_kabupaten.akses_air_minum_persen');
+            }),
+            'ekonomi' => $query->whereNotNull('desa.ike_2024'),
+        };
+
+        $ranked = $query
+            ->get()
+            ->map(function (object $candidate) use (
+                $input,
+                $requirements,
+                $locationType,
+                $radiusKm,
+                $nearbyDistances,
+            ): ?array {
+                $urgency = $this->sectorUrgencyFromIndicators(
+                    $input['bidang'],
+                    $candidate->iks_2024 === null ? null : (float) $candidate->iks_2024,
+                    $candidate->ike_2024 === null ? null : (float) $candidate->ike_2024,
+                    $candidate->ikl_2024 === null ? null : (float) $candidate->ikl_2024,
+                    $candidate->jarak_sekolah_resmi_km === null
+                        ? null
+                        : (float) $candidate->jarak_sekolah_resmi_km,
+                    $candidate->jarak_faskes_fix_km === null
+                        ? null
+                        : (float) $candidate->jarak_faskes_fix_km,
+                    $candidate->akses_internet_layak_persen === null
+                        ? null
+                        : (float) $candidate->akses_internet_layak_persen,
+                    $candidate->akses_air_minum_persen === null
+                        ? null
+                        : (float) $candidate->akses_air_minum_persen,
+                );
+
+                if ($urgency === null) {
+                    return null;
+                }
+
+                $distanceKm = $locationType === 'desa'
+                    ? (float) $nearbyDistances[$candidate->kode_desa]->distance_km
+                    : null;
+                $scores = $this->calculateScores(
+                    $urgency,
+                    $input,
+                    $requirements,
+                    $distanceKm,
+                    $locationType,
+                    $radiusKm,
+                );
+
+                return [
+                    'region_id' => (string) $candidate->kode_desa,
+                    'match_score' => $scores['match_score'],
+                    'distance_km' => $distanceKm,
+                ];
+            })
+            ->filter()
+            ->sort(fn (array $first, array $second): int => (
+                ($second['match_score'] <=> $first['match_score'])
+                ?: strcmp($first['region_id'], $second['region_id'])
+            ))
+            ->values()
+            ->all();
+
+        return ['nearby_found' => true, 'items' => $ranked];
+    }
+
+    private function loadCandidatePage(
+        array $pageRanking,
+        array $input,
+        Activity $requirements,
+        ?string $locationType,
+        float $radiusKm,
+    ): array {
+        if ($pageRanking === []) {
+            return [];
+        }
+
+        $desas = DB::table('desa')
+            ->leftJoin('kecamatan as matching_kecamatan', 'desa.kode_kec', '=', 'matching_kecamatan.kode_kec')
+            ->leftJoin('kabupaten as matching_kabupaten', 'matching_kecamatan.kode_kab', '=', 'matching_kabupaten.kode_kab')
+            ->whereIn('desa.kode_desa', array_column($pageRanking, 'region_id'))
+            ->select([
+                'desa.kode_desa as sm_desa_kode_desa',
+                'desa.kode_kec as sm_desa_kode_kec',
+                'desa.nama_desa as sm_desa_nama_desa',
+                'desa.unit_type as sm_desa_unit_type',
+                'desa.iks_2024 as sm_desa_iks_2024',
+                'desa.ike_2024 as sm_desa_ike_2024',
+                'desa.ikl_2024 as sm_desa_ikl_2024',
+                'desa.jarak_sekolah_resmi_km as sm_desa_jarak_sekolah_resmi_km',
+                'desa.jarak_faskes_fix_km as sm_desa_jarak_faskes_fix_km',
+                'matching_kecamatan.kode_kec as sm_kecamatan_kode_kec',
+                'matching_kecamatan.kode_kab as sm_kecamatan_kode_kab',
+                'matching_kecamatan.nama_kecamatan as sm_kecamatan_nama_kecamatan',
+                'matching_kabupaten.kode_kab as sm_kabupaten_kode_kab',
+                'matching_kabupaten.nama_kabupaten as sm_kabupaten_nama_kabupaten',
+                'matching_kabupaten.akses_air_minum_persen as sm_kabupaten_akses_air_minum_persen',
+                'matching_kabupaten.akses_internet_layak_persen as sm_kabupaten_akses_internet_layak_persen',
+            ])
+            ->get()
+            ->keyBy('sm_desa_kode_desa');
+
+        $page = [];
+        foreach ($pageRanking as $rank) {
+            $row = $desas->get($rank['region_id']);
+            if ($row === null) {
+                continue;
+            }
+
+            $desa = (new Desa())->newFromBuilder([
+                'kode_desa' => $row->sm_desa_kode_desa,
+                'kode_kec' => $row->sm_desa_kode_kec,
+                'nama_desa' => $row->sm_desa_nama_desa,
+                'unit_type' => $row->sm_desa_unit_type,
+                'iks_2024' => $row->sm_desa_iks_2024,
+                'ike_2024' => $row->sm_desa_ike_2024,
+                'ikl_2024' => $row->sm_desa_ikl_2024,
+                'jarak_sekolah_resmi_km' => $row->sm_desa_jarak_sekolah_resmi_km,
+                'jarak_faskes_fix_km' => $row->sm_desa_jarak_faskes_fix_km,
+            ]);
+
+            if ($row->sm_kecamatan_kode_kec !== null) {
+                $kecamatan = (new Kecamatan())->newFromBuilder([
+                    'kode_kec' => $row->sm_kecamatan_kode_kec,
+                    'kode_kab' => $row->sm_kecamatan_kode_kab,
+                    'nama_kecamatan' => $row->sm_kecamatan_nama_kecamatan,
+                ]);
+                if ($row->sm_kabupaten_kode_kab !== null) {
+                    $kabupaten = (new Kabupaten())->newFromBuilder([
+                        'kode_kab' => $row->sm_kabupaten_kode_kab,
+                        'nama_kabupaten' => $row->sm_kabupaten_nama_kabupaten,
+                        'akses_air_minum_persen' => $row->sm_kabupaten_akses_air_minum_persen,
+                        'akses_internet_layak_persen' => $row->sm_kabupaten_akses_internet_layak_persen,
+                    ]);
+                    $kecamatan->setRelation('kabupaten', $kabupaten);
+                }
+                $desa->setRelation('kecamatan', $kecamatan);
+            }
+
+            $candidate = $this->scoreCandidate(
+                $desa,
+                $input,
+                $requirements,
+                $rank['distance_km'] === null ? null : (float) $rank['distance_km'],
+                $locationType,
+                $radiusKm,
+            );
+
+            if ($candidate !== null) {
+                $candidate['match_score'] = $rank['match_score'];
+                $page[] = $candidate;
+            }
+        }
+
+        return $page;
+    }
+
     private function nearbyVillageDistances(string $originCode, float $radiusKm)
     {
         $isSqliteTest = app()->environment('testing')
             && DB::connection()->getDriverName() === 'sqlite';
         $geographyCast = $isSqliteTest ? '' : '::geography';
-        $distanceExpression = "ST_Distance(
-            ST_Centroid(candidate_geom.geom){$geographyCast},
-            ST_Centroid(origin_geom.geom){$geographyCast}
-        ) / 1000.0";
+        $candidateCentroid = "ST_Centroid(candidate_geom.geom){$geographyCast}";
+        $originCentroid = "ST_Centroid(origin_geom.geom){$geographyCast}";
+        $distanceExpression = "ST_Distance({$candidateCentroid}, {$originCentroid}) / 1000.0";
 
         return collect(DB::select(
-            "SELECT candidate_geom.kode_desa AS region_id, {$distanceExpression} AS distance_km
+            "SELECT candidate_geom.kode_desa AS region_id,
+                {$distanceExpression} AS distance_km
             FROM desa_geom AS candidate_geom
-            CROSS JOIN desa_geom AS origin_geom
-            WHERE origin_geom.kode_desa = ?
-                AND {$distanceExpression} <= CAST(? AS DOUBLE PRECISION)",
-            [$originCode, $radiusKm],
+            JOIN desa_geom AS origin_geom ON origin_geom.kode_desa = ?
+            WHERE ST_DWithin(
+                {$candidateCentroid},
+                {$originCentroid},
+                CAST(? AS DOUBLE PRECISION)
+            )",
+            [$originCode, $radiusKm * 1000],
         ))->keyBy('region_id');
     }
 
@@ -327,25 +534,21 @@ class SmartMatchingService
             return null;
         }
 
-        $budget = (float) $input['anggaran'];
+        $scores = $this->calculateScores(
+            $urgensiBidang,
+            $input,
+            $requirements,
+            $distanceKm,
+            $locationType,
+            $radiusKm,
+        );
         $minimumBudget = $this->minimumBudgetForDuration($requirements, $input);
-        $skorAnggaran = $budget < $minimumBudget
-            ? ($budget / $minimumBudget) * 100
-            : 100;
-        $skorPelaksana = min(((int) $input['pelaksana'] / $requirements->required_people) * 100, 100);
-        $skorDurasi = min(((int) $input['durasi'] / $requirements->duration_days) * 100, 100);
-        $skorKapasitas = ($skorAnggaran * 0.5) + ($skorPelaksana * 0.25) + ($skorDurasi * 0.25);
-        $skorResourceMinimum = min($skorAnggaran, $skorPelaksana, $skorDurasi);
-        $resourcesMeetMinimum = $budget >= $minimumBudget
-            && (int) $input['pelaksana'] >= $requirements->required_people
-            && (int) $input['durasi'] >= $requirements->duration_days;
-        $programMatchScore = (int) round(($urgensiBidang * 0.5) + ($skorResourceMinimum * 0.5));
-        $proximityScore = $locationType === 'desa' && $distanceKm !== null
-            ? round(max(0, 1 - ($distanceKm / $radiusKm)) * 100)
-            : null;
-        $matchScore = $locationType === 'desa' && $proximityScore !== null
-            ? (int) round(($programMatchScore * 0.6) + ($proximityScore * 0.4))
-            : $programMatchScore;
+        $skorAnggaran = $scores['budget_score'];
+        $skorKapasitas = $scores['capacity_score'];
+        $resourcesMeetMinimum = $scores['resources_meet_minimum'];
+        $programMatchScore = $scores['program_match_score'];
+        $proximityScore = $scores['proximity_score'];
+        $matchScore = $scores['match_score'];
         $kecamatan = $desa->kecamatan;
         $kabupaten = $kecamatan?->kabupaten;
 
@@ -408,28 +611,90 @@ class SmartMatchingService
 
     private function sectorUrgency(Desa $desa, string $category): ?float
     {
+        $kabupaten = $desa->kecamatan?->kabupaten;
+
+        return $this->sectorUrgencyFromIndicators(
+            $category,
+            $desa->iks_2024 === null ? null : (float) $desa->iks_2024,
+            $desa->ike_2024 === null ? null : (float) $desa->ike_2024,
+            $desa->ikl_2024 === null ? null : (float) $desa->ikl_2024,
+            $desa->jarak_sekolah_resmi_km === null ? null : (float) $desa->jarak_sekolah_resmi_km,
+            $desa->jarak_faskes_fix_km === null ? null : (float) $desa->jarak_faskes_fix_km,
+            $kabupaten?->akses_internet_layak_persen,
+            $kabupaten?->akses_air_minum_persen,
+        );
+    }
+
+    private function sectorUrgencyFromIndicators(
+        string $category,
+        ?float $healthIndex,
+        ?float $economicIndex,
+        ?float $landIndex,
+        ?float $schoolDistance,
+        ?float $healthFacilityDistance,
+        ?float $internetCoverage,
+        ?float $drinkingWaterAccess,
+    ): ?float {
         return match ($category) {
             'kesehatan' => $this->averageAvailableScores([
-                $desa->iks_2024 === null ? null : $this->indexGap((float) $desa->iks_2024),
-                $desa->jarak_faskes_fix_km === null
+                $healthIndex === null ? null : $this->indexGap($healthIndex),
+                $healthFacilityDistance === null
                     ? null
-                    : min(max(((float) $desa->jarak_faskes_fix_km / 10) * 100, 0), 100),
+                    : min(max(($healthFacilityDistance / 10) * 100, 0), 100),
             ]),
-            'pendidikan' => $desa->jarak_sekolah_resmi_km === null
+            'pendidikan' => $schoolDistance === null
                 ? null
-                : min(max(((float) $desa->jarak_sekolah_resmi_km / 5) * 100, 0), 100),
-            'internet' => $desa->kecamatan?->kabupaten?->akses_internet_layak_persen === null
+                : min(max(($schoolDistance / 5) * 100, 0), 100),
+            'internet' => $internetCoverage === null
                 ? null
-                : min(max(100 - (float) $desa->kecamatan->kabupaten->akses_internet_layak_persen, 0), 100),
+                : min(max(100 - $internetCoverage, 0), 100),
             'infrastruktur' => $this->averageAvailableScores([
-                $desa->ikl_2024 === null ? null : $this->indexGap((float) $desa->ikl_2024),
-                $desa->kecamatan?->kabupaten?->akses_air_minum_persen === null
+                $landIndex === null ? null : $this->indexGap($landIndex),
+                $drinkingWaterAccess === null
                     ? null
-                    : min(max(100 - (float) $desa->kecamatan->kabupaten->akses_air_minum_persen, 0), 100),
+                    : min(max(100 - $drinkingWaterAccess, 0), 100),
             ]),
-            'ekonomi' => $desa->ike_2024 === null ? null : $this->indexGap((float) $desa->ike_2024),
+            'ekonomi' => $economicIndex === null ? null : $this->indexGap($economicIndex),
             default => null,
         };
+    }
+
+    private function calculateScores(
+        float $urgency,
+        array $input,
+        Activity $requirements,
+        ?float $distanceKm,
+        ?string $locationType,
+        float $radiusKm,
+    ): array {
+        $budget = (float) $input['anggaran'];
+        $minimumBudget = $this->minimumBudgetForDuration($requirements, $input);
+        $budgetScore = $budget < $minimumBudget
+            ? ($budget / $minimumBudget) * 100
+            : 100;
+        $peopleScore = min(((int) $input['pelaksana'] / $requirements->required_people) * 100, 100);
+        $durationScore = min(((int) $input['durasi'] / $requirements->duration_days) * 100, 100);
+        $capacityScore = ($budgetScore * 0.5) + ($peopleScore * 0.25) + ($durationScore * 0.25);
+        $resourceMinimumScore = min($budgetScore, $peopleScore, $durationScore);
+        $resourcesMeetMinimum = $budget >= $minimumBudget
+            && (int) $input['pelaksana'] >= $requirements->required_people
+            && (int) $input['durasi'] >= $requirements->duration_days;
+        $programMatchScore = (int) round(($urgency * 0.5) + ($resourceMinimumScore * 0.5));
+        $proximityScore = $locationType === 'desa' && $distanceKm !== null
+            ? round(max(0, 1 - ($distanceKm / $radiusKm)) * 100)
+            : null;
+        $matchScore = $locationType === 'desa' && $proximityScore !== null
+            ? (int) round(($programMatchScore * 0.6) + ($proximityScore * 0.4))
+            : $programMatchScore;
+
+        return [
+            'budget_score' => $budgetScore,
+            'capacity_score' => $capacityScore,
+            'resources_meet_minimum' => $resourcesMeetMinimum,
+            'program_match_score' => $programMatchScore,
+            'proximity_score' => $proximityScore,
+            'match_score' => $matchScore,
+        ];
     }
 
     private function indexGap(float $index): float
@@ -641,8 +906,35 @@ class SmartMatchingService
 
     private function addAiExplanations(array $input, Activity $requirements, array $candidates): array
     {
-        $apiKey = config('services.gemini.key');
+        $rankingPayload = $input;
+        unset($rankingPayload['offset'], $rankingPayload['limit']);
+        ksort($rankingPayload);
 
+        $cacheKeys = [];
+        $missingCandidates = [];
+        foreach ($candidates as $index => $candidate) {
+            $cacheKey = $this->aiExplanationCacheKey($rankingPayload, $requirements, $candidate);
+            $cacheKeys[$candidate['region_id']] = $cacheKey;
+            $cached = Cache::get($cacheKey);
+
+            if (is_array($cached)
+                && is_string($cached['match_reason'] ?? null)
+                && trim($cached['match_reason']) !== ''
+                && is_string($cached['recommended_action'] ?? null)
+                && trim($cached['recommended_action']) !== ''
+            ) {
+                $candidates[$index]['match_reason'] = $cached['match_reason'];
+                $candidates[$index]['recommended_action'] = $cached['recommended_action'];
+            } else {
+                $missingCandidates[] = $candidate;
+            }
+        }
+
+        if ($missingCandidates === []) {
+            return $this->withoutScoringContext($candidates);
+        }
+
+        $apiKey = config('services.gemini.key');
         if (! is_string($apiKey) || trim($apiKey) === '') {
             Log::warning('Smart Matching Gemini fallback used: API key is not configured.');
 
@@ -651,12 +943,12 @@ class SmartMatchingService
 
         try {
             $response = Http::withHeaders(['x-goog-api-key' => $apiKey])
-                ->timeout(15)
+                ->timeout(5)
                 ->post(config('services.gemini.url'), [
                     'contents' => [
                         [
                             'parts' => [
-                                ['text' => $this->aiPrompt($input, $requirements, $candidates)],
+                                ['text' => $this->aiPrompt($rankingPayload, $requirements, $missingCandidates)],
                             ],
                         ],
                     ],
@@ -696,15 +988,16 @@ class SmartMatchingService
                 throw new UnexpectedValueException('Gemini tidak mengembalikan objek JSON.');
             }
 
-            $explanations = $this->validatedExplanations($generated, $candidates);
+            $explanations = $this->validatedExplanations($generated, $missingCandidates);
 
-            foreach ($candidates as &$candidate) {
-                if (isset($explanations[$candidate['region_id']])) {
-                    $candidate['match_reason'] = $explanations[$candidate['region_id']]['match_reason'];
-                    $candidate['recommended_action'] = $explanations[$candidate['region_id']]['recommended_action'];
+            foreach ($candidates as $index => $candidate) {
+                $regionId = $candidate['region_id'];
+                if (isset($explanations[$regionId])) {
+                    Cache::put($cacheKeys[$regionId], $explanations[$regionId], now()->addDays(30));
+                    $candidates[$index]['match_reason'] = $explanations[$regionId]['match_reason'];
+                    $candidates[$index]['recommended_action'] = $explanations[$regionId]['recommended_action'];
                 }
             }
-            unset($candidate);
 
             return $this->withoutScoringContext($candidates);
         } catch (ConnectionException|RequestException|JsonException|UnexpectedValueException $exception) {
@@ -714,6 +1007,31 @@ class SmartMatchingService
 
             return $this->withoutScoringContext($candidates);
         }
+    }
+
+    private function aiExplanationCacheKey(array $payload, Activity $requirements, array $candidate): string
+    {
+        return 'sm:explanation:v1:'.hash('sha256', json_encode([
+            'region_id' => $candidate['region_id'],
+            'payload' => $payload,
+            'requirements' => [
+                'id' => $requirements->id,
+                'title' => $requirements->title,
+                'min_budget' => $requirements->min_budget,
+                'max_budget' => $requirements->max_budget,
+                'required_people' => $requirements->required_people,
+                'duration_days' => $requirements->duration_days,
+            ],
+            'candidate' => [
+                'village_name' => $candidate['village_name'],
+                'district_name' => $candidate['district_name'],
+                'match_score' => $candidate['match_score'],
+                'urgency_level' => $candidate['urgency_level'],
+                'feasibility_status' => $candidate['feasibility_status'],
+                'distance_km' => $candidate['distance_km'],
+                'scoring_context' => $candidate['scoring_context'],
+            ],
+        ], JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR));
     }
 
     private function aiPrompt(array $input, Activity $requirements, array $candidates): string

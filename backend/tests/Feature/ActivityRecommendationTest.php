@@ -176,7 +176,7 @@ class ActivityRecommendationTest extends TestCase
         );
     }
 
-    public function test_gemini_fallback_is_not_cached_and_next_request_retries(): void
+    public function test_gemini_fallback_is_cached_for_five_minutes_then_retried(): void
     {
         config([
             'services.gemini.key' => 'test-key',
@@ -197,6 +197,15 @@ class ActivityRecommendationTest extends TestCase
         $this->getJson($url)
             ->assertOk()
             ->assertJsonPath('data.ai_available', false);
+        $this->travel(4)->minutes();
+        $this->getJson($url)
+            ->assertOk()
+            ->assertJsonPath('data.ai_available', false)
+            ->assertJsonCount(3, 'data.recommendations');
+
+        $this->assertSame(1, $attempts);
+
+        $this->travel(2)->minutes();
         $this->getJson($url)
             ->assertOk()
             ->assertJsonPath('data.ai_available', true)
