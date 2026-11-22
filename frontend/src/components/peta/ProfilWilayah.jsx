@@ -650,7 +650,15 @@ function ProfilWilayah({
                       {item.description && (
                         <p className="mt-1 text-xs text-gray-600">{item.description}</p>
                       )}
-                      <p className="mt-1 text-xs text-gray-600">{item.explanation}</p>
+                      {typeof item.explanation === 'string'
+                        && item.explanation.trim() !== ''
+                        && (
+                          typeof item.description !== 'string'
+                          || item.explanation.trim().toLowerCase() !== item.description.trim().toLowerCase()
+                        )
+                        && (
+                          <p className="mt-1 text-xs text-gray-600">{item.explanation}</p>
+                        )}
                       <p className="mt-2 text-xs text-gray-600">
                         Anggaran: {formatAnggaran(item.budget_min)}–{formatAnggaran(item.budget_max)}
                         {' · '}Pelaksana: {item.people ?? 'Belum tersedia'}

@@ -25,7 +25,7 @@ class ActivityRecommendationService
     public function generate(Desa $desa, array $context = []): array
     {
         $context = array_intersect_key($context, array_flip(['bidang', 'budget', 'people', 'duration']));
-        $cacheKey = 'activity-recommendations:v2:'.hash(
+        $cacheKey = 'activity-recommendations:v3:'.hash(
             'sha256',
             json_encode([
                 'desa' => (string) $desa->kode_desa,
@@ -38,8 +38,9 @@ class ActivityRecommendationService
             return $cached;
         }
 
-        $result = $this->generateRecommendations($desa, $context);
-        $expiresAt = $result['ai_available']
+        $usedTemplateForDatasetExplanation = false;
+        $result = $this->generateRecommendations($desa, $context, $usedTemplateForDatasetExplanation);
+        $expiresAt = $result['ai_available'] && ! $usedTemplateForDatasetExplanation
             ? now()->addHours(6)
             : now()->addMinutes(5);
         Cache::put($cacheKey, $result, $expiresAt);
@@ -47,7 +48,11 @@ class ActivityRecommendationService
         return $result;
     }
 
-    private function generateRecommendations(Desa $desa, array $context): array
+    private function generateRecommendations(
+        Desa $desa,
+        array $context,
+        bool &$usedTemplateForDatasetExplanation,
+    ): array
     {
         $activitiesByCategory = $this->availableActivities();
         $rankedCategories = $this->rankCategories($desa);
@@ -105,7 +110,15 @@ class ActivityRecommendationService
             );
 
             foreach ($datasetRecommendations as &$recommendation) {
-                $recommendation['explanation'] = $datasetExplanations[$recommendation['id']];
+                $explanation = $datasetExplanations[$recommendation['id']];
+                if ($this->repeatsDescription($recommendation['description'], $explanation)) {
+                    $recommendation['explanation'] = $this->templateExplanation($desa, $recommendation['category']);
+                    $usedTemplateForDatasetExplanation = true;
+
+                    continue;
+                }
+
+                $recommendation['explanation'] = $explanation;
             }
             unset($recommendation);
 
@@ -274,7 +287,7 @@ class ActivityRecommendationService
             ->post(config('services.gemini.url'), [
                 'systemInstruction' => [
                     'parts' => [[
-                        'text' => 'Kamu membantu menyusun rekomendasi kegiatan untuk desa. Balas JSON saja sesuai skema. Untuk kegiatan dataset, hanya tulis penjelasan dan jangan mengubah data dataset. Untuk saran AI, buat judul, ringkasan, penjelasan, dan perkiraan anggaran, jumlah pelaksana, durasi yang masuk akal. Gunakan hanya indikator yang diberikan. Jangan mengarang link, nama desa, atau angka indikator yang tidak diberikan. Jangan menduplikasi judul kegiatan dataset atau saran AI lain.',
+                        'text' => 'Kamu membantu menyusun rekomendasi kegiatan untuk desa. Balas JSON saja sesuai skema. Untuk setiap kegiatan dataset, explanation harus menjelaskan mengapa kegiatan itu relevan dengan kondisi desa ini, dengan menyebut indikator dan angka yang tersedia dalam konteks. Maksimal dua kalimat. DILARANG menyalin, mengulang, atau memparafrase description kegiatan. Contoh format benar: description="Layanan kesehatan keliling"; health_facility_distance_km=10; explanation="Fasilitas kesehatan terdekat berjarak 10 km, sehingga kegiatan ini relevan untuk memperluas akses warga yang jauh dari layanan." Untuk saran AI, buat judul, ringkasan, penjelasan, dan perkiraan anggaran, jumlah pelaksana, durasi yang masuk akal. Gunakan hanya indikator yang diberikan. Jangan mengarang link, nama desa, atau angka indikator yang tidak diberikan. Jangan menduplikasi judul kegiatan dataset atau saran AI lain.',
                     ]],
                 ],
                 'contents' => [[
@@ -407,6 +420,32 @@ class ActivityRecommendationService
         }
 
         return $explanations;
+    }
+
+    private function repeatsDescription(string $description, string $explanation): bool
+    {
+        $normalizedDescription = $this->normalizeExplanationText($description);
+        if ($normalizedDescription === '') {
+            return false;
+        }
+
+        $normalizedExplanation = $this->normalizeExplanationText($explanation);
+        if ($normalizedExplanation === $normalizedDescription
+            || str_contains($normalizedExplanation, $normalizedDescription)
+        ) {
+            return true;
+        }
+
+        similar_text($normalizedDescription, $normalizedExplanation, $similarity);
+
+        return $similarity > 85;
+    }
+
+    private function normalizeExplanationText(string $text): string
+    {
+        $lowercase = mb_strtolower(trim($text));
+
+        return preg_replace('/\s+/u', ' ', $lowercase) ?? $lowercase;
     }
 
     private function validateAiRecommendations(

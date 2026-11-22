@@ -135,6 +135,231 @@ class ActivityRecommendationTest extends TestCase
         }
     }
 
+    public function test_identical_explanation_uses_template_for_only_that_dataset_item(): void
+    {
+        config([
+            'services.gemini.key' => 'test-key',
+            'services.gemini.url' => 'https://gemini.test/generate',
+        ]);
+        Http::fake([
+            'https://gemini.test/generate' => fn ($request) => $this->geminiResponse(
+                $request,
+                fn (array $item, int $index): string => $index === 0
+                    ? $item['description']
+                    : "Penjelasan Gemini berbeda {$index}.",
+            ),
+        ]);
+
+        $response = $this->getJson('/api/v1/regions/desa/3301012001/recommendations?bidang=internet&budget=3000000&people=4&duration=14');
+        $response->assertOk()->assertJsonPath('data.ai_available', true);
+
+        $dataset = array_slice($response->json('data.recommendations'), 0, 3);
+        $this->assertNotSame($dataset[0]['description'], $dataset[0]['explanation']);
+        $this->assertStringContainsString('Kegiatan ini relevan dengan', $dataset[0]['explanation']);
+        $this->assertSame('Penjelasan Gemini berbeda 1.', $dataset[1]['explanation']);
+        $this->assertSame('Penjelasan Gemini berbeda 2.', $dataset[2]['explanation']);
+    }
+
+    public function test_all_identical_dataset_explanations_use_templates(): void
+    {
+        config([
+            'services.gemini.key' => 'test-key',
+            'services.gemini.url' => 'https://gemini.test/generate',
+        ]);
+        Http::fake([
+            'https://gemini.test/generate' => fn ($request) => $this->geminiResponse(
+                $request,
+                fn (array $item): string => $item['description'],
+            ),
+        ]);
+
+        $response = $this->getJson('/api/v1/regions/desa/3301012001/recommendations?bidang=internet&budget=3000000&people=4&duration=14');
+        $response->assertOk()->assertJsonPath('data.ai_available', true);
+
+        foreach (array_slice($response->json('data.recommendations'), 0, 3) as $item) {
+            $this->assertNotSame($item['description'], $item['explanation']);
+            $this->assertStringContainsString('Kegiatan ini relevan dengan', $item['explanation']);
+        }
+    }
+
+    public function test_similar_dataset_explanation_uses_template(): void
+    {
+        $description = 'Program literasi digital membantu warga menggunakan internet secara aman dan bertanggung jawab.';
+        $nearDuplicate = str_replace('dan bertanggung jawab', 'serta bertanggung jawab', $description);
+        similar_text($description, $nearDuplicate, $similarity);
+        $this->assertGreaterThan(85, $similarity);
+
+        DB::table('activities')->where('category', 'internet')->update([
+            'description' => $description,
+        ]);
+        config([
+            'services.gemini.key' => 'test-key',
+            'services.gemini.url' => 'https://gemini.test/generate',
+        ]);
+        Http::fake([
+            'https://gemini.test/generate' => fn ($request) => $this->geminiResponse(
+                $request,
+                fn (array $item, int $index): string => $index === 0
+                    ? str_replace('dan bertanggung jawab', 'serta bertanggung jawab', $item['description'])
+                    : "Penjelasan Gemini berbeda {$index}.",
+            ),
+        ]);
+
+        $response = $this->getJson('/api/v1/regions/desa/3301012001/recommendations?bidang=internet&budget=3000000&people=4&duration=14');
+        $response->assertOk()->assertJsonPath('data.ai_available', true);
+
+        $dataset = array_slice($response->json('data.recommendations'), 0, 3);
+        $this->assertStringContainsString('Kegiatan ini relevan dengan', $dataset[0]['explanation']);
+        $this->assertSame('Penjelasan Gemini berbeda 1.', $dataset[1]['explanation']);
+        $this->assertSame('Penjelasan Gemini berbeda 2.', $dataset[2]['explanation']);
+    }
+
+    public function test_normalized_description_contained_in_explanation_uses_template(): void
+    {
+        config([
+            'services.gemini.key' => 'test-key',
+            'services.gemini.url' => 'https://gemini.test/generate',
+        ]);
+        Http::fake([
+            'https://gemini.test/generate' => fn ($request) => $this->geminiResponse(
+                $request,
+                fn (array $item, int $index): string => $index === 0
+                    ? '  '.mb_strtoupper($item['description'])."  relevan untuk desa  "
+                    : "Penjelasan Gemini berbeda {$index}.",
+            ),
+        ]);
+
+        $response = $this->getJson('/api/v1/regions/desa/3301012001/recommendations?bidang=internet&budget=3000000&people=4&duration=14');
+        $response->assertOk()->assertJsonPath('data.ai_available', true);
+
+        $dataset = array_slice($response->json('data.recommendations'), 0, 3);
+        $this->assertStringContainsString('Kegiatan ini relevan dengan', $dataset[0]['explanation']);
+        $this->assertSame('Penjelasan Gemini berbeda 1.', $dataset[1]['explanation']);
+        $this->assertSame('Penjelasan Gemini berbeda 2.', $dataset[2]['explanation']);
+    }
+
+    public function test_valid_dataset_explanations_are_used_unchanged(): void
+    {
+        config([
+            'services.gemini.key' => 'test-key',
+            'services.gemini.url' => 'https://gemini.test/generate',
+        ]);
+        Http::fake([
+            'https://gemini.test/generate' => fn ($request) => $this->geminiResponse(
+                $request,
+                fn (array $item, int $index): string => "Penjelasan Gemini valid {$index}.",
+            ),
+        ]);
+
+        $response = $this->getJson('/api/v1/regions/desa/3301012001/recommendations?bidang=internet&budget=3000000&people=4&duration=14');
+        $response->assertOk()->assertJsonPath('data.ai_available', true);
+
+        $dataset = array_slice($response->json('data.recommendations'), 0, 3);
+        foreach ($dataset as $index => $item) {
+            $this->assertSame("Penjelasan Gemini valid {$index}.", $item['explanation']);
+        }
+    }
+
+    public function test_partial_template_fallback_is_retried_after_six_minutes(): void
+    {
+        config([
+            'services.gemini.key' => 'test-key',
+            'services.gemini.url' => 'https://gemini.test/generate',
+        ]);
+        $attempts = 0;
+        Http::fake([
+            'https://gemini.test/generate' => function ($request) use (&$attempts) {
+                $attempts++;
+
+                return $this->geminiResponse(
+                    $request,
+                    fn (array $item, int $index): string => $attempts === 1 && $index === 0
+                        ? $item['description']
+                        : "Penjelasan Gemini percobaan {$attempts} item {$index}.",
+                );
+            },
+        ]);
+        $url = '/api/v1/regions/desa/3301012001/recommendations?bidang=internet&budget=3000000&people=4&duration=14';
+
+        $this->getJson($url)->assertOk()->assertJsonPath('data.ai_available', true);
+        $this->travel(6)->minutes();
+
+        $response = $this->getJson($url)->assertOk()->assertJsonPath('data.ai_available', true);
+        $this->assertSame(2, $attempts);
+        $this->assertSame(
+            'Penjelasan Gemini percobaan 2 item 0.',
+            $response->json('data.recommendations.0.explanation'),
+        );
+    }
+
+    public function test_all_valid_dataset_explanations_remain_cached_for_six_hours(): void
+    {
+        config([
+            'services.gemini.key' => 'test-key',
+            'services.gemini.url' => 'https://gemini.test/generate',
+        ]);
+        $attempts = 0;
+        Http::fake([
+            'https://gemini.test/generate' => function ($request) use (&$attempts) {
+                $attempts++;
+
+                return $this->geminiResponse(
+                    $request,
+                    fn (array $item, int $index): string => "Penjelasan Gemini valid {$index}.",
+                );
+            },
+        ]);
+        $url = '/api/v1/regions/desa/3301012001/recommendations?bidang=internet&budget=3000000&people=4&duration=14';
+
+        $this->getJson($url)->assertOk()->assertJsonPath('data.ai_available', true);
+        $this->travel(6)->minutes();
+        $this->getJson($url)->assertOk()->assertJsonPath('data.ai_available', true);
+        $this->assertSame(1, $attempts);
+
+        $this->travel(5)->hours();
+        $this->travel(55)->minutes();
+        $this->getJson($url)->assertOk()->assertJsonPath('data.ai_available', true);
+        $this->assertSame(2, $attempts);
+    }
+
+    public function test_invalid_dataset_explanation_lists_keep_structural_fallback(): void
+    {
+        config([
+            'services.gemini.key' => 'test-key',
+            'services.gemini.url' => 'https://gemini.test/generate',
+        ]);
+        $variants = ['missing', 'empty', 'wrong-id', 'wrong-count'];
+        $attempts = 0;
+        Http::fake([
+            'https://gemini.test/generate' => function ($request) use (&$attempts, $variants) {
+                $variant = $variants[$attempts++];
+
+                return $this->geminiResponse(
+                    $request,
+                    $variant === 'empty'
+                        ? fn (array $item): string => ''
+                        : null,
+                    $variant,
+                );
+            },
+        ]);
+
+        foreach ($variants as $index => $variant) {
+            $response = $this->getJson(
+                '/api/v1/regions/desa/3301012001/recommendations?bidang=internet&budget='.(3000000 + $index).'&people=4&duration=14',
+            );
+            $response->assertOk()->assertJsonPath('data.ai_available', false);
+
+            $items = $response->json('data.recommendations');
+            $this->assertCount(3, $items);
+            foreach ($items as $item) {
+                $this->assertNotSame($item['description'], $item['explanation']);
+            }
+        }
+
+        $this->assertSame(count($variants), $attempts);
+    }
+
     public function test_map_recommendations_have_five_items_with_at_most_two_per_category(): void
     {
         config([
@@ -248,40 +473,59 @@ class ActivityRecommendationTest extends TestCase
             ->assertJsonValidationErrors('include_recommendations');
     }
 
-    private function geminiResponse($request)
+    private function geminiResponse(
+        $request,
+        ?callable $datasetExplanation = null,
+        string $datasetExplanationVariant = 'valid',
+    )
     {
         $prompt = $request['contents'][0]['parts'][0]['text'];
         preg_match('/Kegiatan dataset terpilih.*?: (\[.*\])\nKategori saran AI yang harus dipakai berurutan: (\[.*\])$/s', $prompt, $matches);
         $dataset = json_decode($matches[1] ?? '[]', true);
         $categories = json_decode($matches[2] ?? '[]', true);
+        $datasetExplanations = array_map(
+            fn (array $item, int $index): array => [
+                'activity_id' => $datasetExplanationVariant === 'wrong-id'
+                    ? $item['activity_id'] + 100000
+                    : $item['activity_id'],
+                'explanation' => $datasetExplanation === null
+                    ? 'Kegiatan relevan dengan kondisi indikator desa.'
+                    : $datasetExplanation($item, $index),
+            ],
+            $dataset,
+            array_keys($dataset),
+        );
+
+        if ($datasetExplanationVariant === 'wrong-count') {
+            array_pop($datasetExplanations);
+        }
+
+        $generated = [
+            'ai_recommendations' => array_map(
+                fn (string $category, int $index): array => [
+                    'category' => $category,
+                    'title' => 'Saran tambahan '.$category.' '.$index,
+                    'summary' => 'Kegiatan tambahan sesuai kebutuhan lokal.',
+                    'explanation' => 'Saran ini menanggapi indikator desa yang tersedia.',
+                    'budget_min' => 1000000,
+                    'budget_max' => 2000000,
+                    'people' => 4,
+                    'duration' => 14,
+                ],
+                $categories,
+                array_keys($categories),
+            ),
+        ];
+
+        if ($datasetExplanationVariant !== 'missing') {
+            $generated['dataset_explanations'] = $datasetExplanations;
+        }
 
         return Http::response([
             'candidates' => [[
                 'content' => [
                     'parts' => [[
-                        'text' => json_encode([
-                            'dataset_explanations' => array_map(
-                                fn (array $item): array => [
-                                    'activity_id' => $item['activity_id'],
-                                    'explanation' => 'Kegiatan relevan dengan kondisi indikator desa.',
-                                ],
-                                $dataset,
-                            ),
-                            'ai_recommendations' => array_map(
-                                fn (string $category, int $index): array => [
-                                    'category' => $category,
-                                    'title' => 'Saran tambahan '.$category.' '.$index,
-                                    'summary' => 'Kegiatan tambahan sesuai kebutuhan lokal.',
-                                    'explanation' => 'Saran ini menanggapi indikator desa yang tersedia.',
-                                    'budget_min' => 1000000,
-                                    'budget_max' => 2000000,
-                                    'people' => 4,
-                                    'duration' => 14,
-                                ],
-                                $categories,
-                                array_keys($categories),
-                            ),
-                        ]),
+                        'text' => json_encode($generated),
                     ]],
                 ],
             ]],
