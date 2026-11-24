@@ -259,7 +259,7 @@ class SmartMatchingTest extends TestCase
         unset($rankingPayload['offset'], $rankingPayload['limit']);
         ksort($rankingPayload);
         Cache::store('file')->forget(
-            'sm:rank:'.md5(json_encode($rankingPayload, JSON_THROW_ON_ERROR)),
+            'sm:rank:v2:'.md5(json_encode($rankingPayload, JSON_THROW_ON_ERROR)),
         );
 
         $promptedRegionIds = [];
@@ -399,6 +399,53 @@ class SmartMatchingTest extends TestCase
             ->assertJsonPath('data.1.match_score', 45);
     }
 
+    public function test_it_sorts_by_unrounded_score_then_region_id_when_display_scores_tie(): void
+    {
+        config(['services.gemini.key' => null]);
+        $this->addHealthVillage('3301012002', 'POINT(110 -7)');
+        $this->addHealthVillage('3301012003', 'POINT(110 -7)');
+        $this->addHealthVillage('3301012004', 'POINT(110 -7)');
+        DB::table('desa')
+            ->where('kode_desa', '3301012002')
+            ->update(['iks_2024' => null, 'jarak_faskes_fix_km' => 8.08]);
+        DB::table('desa')
+            ->whereIn('kode_desa', ['3301012003', '3301012004'])
+            ->update(['iks_2024' => null, 'jarak_faskes_fix_km' => 8]);
+
+        $response = $this->postJson('/api/v1/smart-matching', [
+            'bidang' => 'kesehatan',
+            'anggaran' => 20000000,
+            'pelaksana' => 4,
+            'durasi' => 14,
+        ])
+            ->assertOk()
+            ->assertJsonCount(4, 'data')
+            ->assertJsonPath('data.0.match_score', 90)
+            ->assertJsonPath('data.1.match_score', 90)
+            ->assertJsonPath('data.2.match_score', 90)
+            ->assertJsonPath('data.3.match_score', 90);
+
+        $this->assertSame(
+            ['3301012002', '3301012001', '3301012003', '3301012004'],
+            array_column($response->json('data'), 'region_id'),
+        );
+
+        $rankingPayload = [
+            'bidang' => 'kesehatan',
+            'anggaran' => 20000000,
+            'pelaksana' => 4,
+            'durasi' => 14,
+        ];
+        ksort($rankingPayload);
+        $ranking = Cache::store('file')->get(
+            'sm:rank:v2:'.md5(json_encode($rankingPayload, JSON_THROW_ON_ERROR)),
+        );
+        $this->assertSame(
+            ['3301012002', '3301012001', '3301012003', '3301012004'],
+            array_column($ranking['items'], 'region_id'),
+        );
+    }
+
     public function test_it_searches_globally_without_an_implicit_origin(): void
     {
         config(['services.gemini.key' => null]);
@@ -441,7 +488,7 @@ class SmartMatchingTest extends TestCase
         $rankingPayload = $baseInput;
         ksort($rankingPayload);
         $ranking = Cache::store('file')->get(
-            'sm:rank:'.md5(json_encode($rankingPayload, JSON_THROW_ON_ERROR)),
+            'sm:rank:v2:'.md5(json_encode($rankingPayload, JSON_THROW_ON_ERROR)),
         );
         $this->assertIsArray($ranking);
         $this->assertSame(true, $ranking['nearby_found']);
@@ -484,6 +531,54 @@ class SmartMatchingTest extends TestCase
         $this->assertSame(['3301012006', '3301012007'], $lastIds);
         $this->assertSame([], array_intersect($firstIds, $lastIds));
         $this->assertSame($sortedScores, $allScores);
+    }
+
+    public function test_it_handles_page_limits_and_offsets_at_or_beyond_total(): void
+    {
+        config(['services.gemini.key' => null]);
+        for ($village = 2; $village <= 22; $village++) {
+            $code = '33010120'.str_pad((string) $village, 2, '0', STR_PAD_LEFT);
+            $this->addHealthVillage($code, 'POINT(110 -7)');
+        }
+
+        $baseInput = [
+            'bidang' => 'kesehatan',
+            'anggaran' => 20000000,
+            'pelaksana' => 4,
+            'durasi' => 14,
+        ];
+
+        $this->postJson('/api/v1/smart-matching', [...$baseInput, 'limit' => 1])
+            ->assertOk()
+            ->assertJsonCount(1, 'data')
+            ->assertJsonPath('meta.total', 22)
+            ->assertJsonPath('meta.has_more', true);
+
+        $this->postJson('/api/v1/smart-matching', [...$baseInput, 'limit' => 20])
+            ->assertOk()
+            ->assertJsonCount(20, 'data')
+            ->assertJsonPath('meta.total', 22)
+            ->assertJsonPath('meta.has_more', true);
+
+        $this->postJson('/api/v1/smart-matching', [
+            ...$baseInput,
+            'limit' => 20,
+            'offset' => 22,
+        ])
+            ->assertOk()
+            ->assertJsonCount(0, 'data')
+            ->assertJsonPath('meta.total', 22)
+            ->assertJsonPath('meta.has_more', false);
+
+        $this->postJson('/api/v1/smart-matching', [
+            ...$baseInput,
+            'limit' => 20,
+            'offset' => 100,
+        ])
+            ->assertOk()
+            ->assertJsonCount(0, 'data')
+            ->assertJsonPath('meta.total', 22)
+            ->assertJsonPath('meta.has_more', false);
     }
 
     public function test_it_validates_pagination_parameters(): void
@@ -548,6 +643,50 @@ class SmartMatchingTest extends TestCase
             ->assertJsonPath('data.0.type', 'desa')
             ->assertJsonPath('data.0.code', '3301012001')
             ->assertJsonPath('data.0.label', 'Tambakreja');
+    }
+
+    public function test_location_search_escapes_percent_and_underscore_wildcards(): void
+    {
+        DB::table('kabupaten')->insert([
+            ['kode_kab' => '3302', 'nama_kabupaten' => 'T% County', 'tipe' => 'kabupaten'],
+            ['kode_kab' => '3303', 'nama_kabupaten' => 'T_ County', 'tipe' => 'kabupaten'],
+        ]);
+        DB::table('kecamatan')->insert([
+            ['kode_kec' => '330201', 'kode_kab' => '3302', 'nama_kecamatan' => 'Kecamatan Persen'],
+            ['kode_kec' => '330301', 'kode_kab' => '3303', 'nama_kecamatan' => 'Kecamatan Garis'],
+        ]);
+        DB::table('desa')->insert([
+            [
+                'kode_desa' => '3302012001',
+                'kode_kec' => '330201',
+                'nama_desa' => 'T% Village',
+                'unit_type' => 'desa',
+            ],
+            [
+                'kode_desa' => '3303012001',
+                'kode_kec' => '330301',
+                'nama_desa' => 'T_ Village',
+                'unit_type' => 'desa',
+            ],
+        ]);
+        DB::table('desa_geom')->insert([
+            ['kode_desa' => '3302012001', 'geom' => 'POINT(110 -7)'],
+            ['kode_desa' => '3303012001', 'geom' => 'POINT(110 -7)'],
+        ]);
+
+        $percentResults = $this->getJson(
+            '/api/v1/smart-matching/locations?q='.rawurlencode('T%'),
+        )
+            ->assertOk()
+            ->assertJsonCount(2, 'data')
+            ->json('data');
+        $this->assertSame(['T% County', 'T% Village'], array_column($percentResults, 'name'));
+
+        $underscoreResults = $this->getJson('/api/v1/smart-matching/locations?q=T_')
+            ->assertOk()
+            ->assertJsonCount(2, 'data')
+            ->json('data');
+        $this->assertSame(['T_ County', 'T_ Village'], array_column($underscoreResults, 'name'));
     }
 
     public function test_categories_endpoint_returns_the_same_response_from_cache(): void
@@ -641,6 +780,47 @@ class SmartMatchingTest extends TestCase
                 strtolower($reason),
                 'kesenjangan indikator kesehatan sekitar 50%',
             ));
+    }
+
+    public function test_it_scores_a_health_village_when_only_one_health_indicator_exists(): void
+    {
+        config(['services.gemini.key' => null]);
+
+        $response = $this->postJson('/api/v1/smart-matching', [
+            'bidang' => 'kesehatan',
+            'anggaran' => 20000000,
+            'pelaksana' => 4,
+            'durasi' => 14,
+        ])
+            ->assertOk()
+            ->assertJsonCount(1, 'data')
+            ->assertJsonPath('data.0.match_score', 90)
+            ->assertJsonPath('data.0.urgency_level', 'Sangat Tinggi');
+
+        $this->assertNull(DB::table('desa')->where('kode_desa', '3301012001')->value('iks_2024'));
+        $this->assertSame(
+            8.0,
+            (float) DB::table('desa')->where('kode_desa', '3301012001')->value('jarak_faskes_fix_km'),
+        );
+    }
+
+    public function test_zero_budget_is_accepted_and_produces_zero_budget_score(): void
+    {
+        config(['services.gemini.key' => null]);
+
+        $this->postJson('/api/v1/smart-matching', [
+            'bidang' => 'kesehatan',
+            'anggaran' => 0,
+            'pelaksana' => 4,
+            'durasi' => 14,
+        ])
+            ->assertOk()
+            ->assertJsonPath('data.0.match_score', 40)
+            ->assertJsonPath('data.0.resources_sufficient', false)
+            ->assertJsonPath(
+                'data.0.feasibility_message',
+                fn (string $message): bool => str_contains($message, 'Rp0 tersedia'),
+            );
     }
 
     public function test_infrastructure_matches_use_land_quality_and_district_drinking_water_gaps(): void
@@ -781,6 +961,44 @@ class SmartMatchingTest extends TestCase
             ->assertJsonPath(
                 'data.0.recommended_action',
                 'Acuan terdekat: "Program kesehatan ringan". Fokuskan 5 pelaksana selama 7 hari pada penyuluhan kesehatan dan pemeriksaan dasar, dimulai dari kelompok atau lokasi dengan kebutuhan tertinggi.',
+            );
+    }
+
+    public function test_closest_activity_ties_choose_the_smallest_id(): void
+    {
+        config(['services.gemini.key' => null]);
+        DB::table('activities')->delete();
+        DB::table('activities')->insert([
+            [
+                'id' => 20,
+                'title' => 'Aktivitas ID 20',
+                'category' => 'kesehatan',
+                'min_budget' => 20000000,
+                'max_budget' => 50000000,
+                'required_people' => 4,
+                'duration_days' => 14,
+            ],
+            [
+                'id' => 10,
+                'title' => 'Aktivitas ID 10',
+                'category' => 'kesehatan',
+                'min_budget' => 20000000,
+                'max_budget' => 50000000,
+                'required_people' => 4,
+                'duration_days' => 14,
+            ],
+        ]);
+
+        $this->postJson('/api/v1/smart-matching', [
+            'bidang' => 'kesehatan',
+            'anggaran' => 20000000,
+            'pelaksana' => 4,
+            'durasi' => 14,
+        ])
+            ->assertOk()
+            ->assertJsonPath(
+                'data.0.recommended_action',
+                'Acuan terdekat: "Aktivitas ID 10". Fokuskan 4 pelaksana selama 14 hari pada penyuluhan kesehatan dan pemeriksaan dasar, dimulai dari kelompok atau lokasi dengan kebutuhan tertinggi.',
             );
     }
 

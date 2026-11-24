@@ -20,6 +20,8 @@ class SmartMatchingService
 {
     private const DEFAULT_RADIUS_KM = 30;
 
+    private const AI_PROMPT_VERSION = 'v2';
+
     private const CATEGORY_LABELS = [
         'kesehatan' => 'Kesehatan',
         'pendidikan' => 'Pendidikan',
@@ -56,10 +58,11 @@ class SmartMatchingService
     {
         $normalizedSearch = mb_strtolower(trim($search));
         $searchLocations = function () use ($normalizedSearch): array {
-            $keyword = '%'.$normalizedSearch.'%';
+            $escapedSearch = str_replace(['!', '%', '_'], ['!!', '!%', '!_'], $normalizedSearch);
+            $keyword = '%'.$escapedSearch.'%';
 
             $kabupaten = DB::table('kabupaten')
-                ->whereRaw('LOWER(nama_kabupaten) LIKE ?', [$keyword])
+                ->whereRaw("LOWER(nama_kabupaten) LIKE ? ESCAPE '!'", [$keyword])
                 ->orderBy('nama_kabupaten')
                 ->limit(5)
                 ->get(['kode_kab', 'nama_kabupaten', 'tipe'])
@@ -75,7 +78,7 @@ class SmartMatchingService
                 ->join('desa_geom', 'desa.kode_desa', '=', 'desa_geom.kode_desa')
                 ->join('kecamatan', 'desa.kode_kec', '=', 'kecamatan.kode_kec')
                 ->join('kabupaten', 'kecamatan.kode_kab', '=', 'kabupaten.kode_kab')
-                ->whereRaw('LOWER(desa.nama_desa) LIKE ?', [$keyword])
+                ->whereRaw("LOWER(desa.nama_desa) LIKE ? ESCAPE '!'", [$keyword])
                 ->orderBy('desa.nama_desa')
                 ->limit(10)
                 ->get([
@@ -122,7 +125,7 @@ class SmartMatchingService
         ksort($rankingPayload);
 
         $ranking = Cache::store('file')->remember(
-            'sm:rank:'.md5(json_encode($rankingPayload, JSON_THROW_ON_ERROR)),
+            'sm:rank:v2:'.md5(json_encode($rankingPayload, JSON_THROW_ON_ERROR)),
             now()->addMinutes(15),
             function () use ($input, $locationType, $radiusKm): array {
                 $activities = $this->programActivities($input['bidang']);
@@ -319,14 +322,20 @@ class SmartMatchingService
                 return [
                     'region_id' => (string) $candidate->kode_desa,
                     'match_score' => $scores['match_score'],
+                    'ranking_score' => $scores['ranking_score'],
                     'distance_km' => $distanceKm,
                 ];
             })
             ->filter()
             ->sort(fn (array $first, array $second): int => (
-                ($second['match_score'] <=> $first['match_score'])
+                ($second['ranking_score'] <=> $first['ranking_score'])
                 ?: strcmp($first['region_id'], $second['region_id'])
             ))
+            ->map(static function (array $candidate): array {
+                unset($candidate['ranking_score']);
+
+                return $candidate;
+            })
             ->values()
             ->all();
 
@@ -455,6 +464,7 @@ class SmartMatchingService
             ->whereColumn('max_budget', '>=', 'min_budget')
             ->where('required_people', '>', 0)
             ->where('duration_days', '>', 0)
+            ->orderBy('id')
             ->get();
 
         if ($activities->isEmpty() && Activity::query()->where('category', $category)->exists()) {
@@ -497,7 +507,10 @@ class SmartMatchingService
     private function closestActivity(Collection $activities, array $input): Activity
     {
         return $activities
-            ->sortBy(fn (Activity $activity): float => $this->activityDistance($activity, $input))
+            ->sort(fn (Activity $first, Activity $second): int => (
+                ($this->activityDistance($first, $input) <=> $this->activityDistance($second, $input))
+                ?: ($first->id <=> $second->id)
+            ))
             ->first();
     }
 
@@ -679,10 +692,17 @@ class SmartMatchingService
         $resourcesMeetMinimum = $budget >= $minimumBudget
             && (int) $input['pelaksana'] >= $requirements->required_people
             && (int) $input['durasi'] >= $requirements->duration_days;
-        $programMatchScore = (int) round(($urgency * 0.5) + ($resourceMinimumScore * 0.5));
-        $proximityScore = $locationType === 'desa' && $distanceKm !== null
-            ? round(max(0, 1 - ($distanceKm / $radiusKm)) * 100)
+        $unroundedProgramMatchScore = ($urgency * 0.5) + ($resourceMinimumScore * 0.5);
+        $programMatchScore = (int) round($unroundedProgramMatchScore);
+        $unroundedProximityScore = $locationType === 'desa' && $distanceKm !== null
+            ? max(0, 1 - ($distanceKm / $radiusKm)) * 100
             : null;
+        $proximityScore = $unroundedProximityScore === null
+            ? null
+            : round($unroundedProximityScore);
+        $rankingScore = $unroundedProximityScore === null
+            ? $unroundedProgramMatchScore
+            : ($unroundedProgramMatchScore * 0.6) + ($unroundedProximityScore * 0.4);
         $matchScore = $locationType === 'desa' && $proximityScore !== null
             ? (int) round(($programMatchScore * 0.6) + ($proximityScore * 0.4))
             : $programMatchScore;
@@ -693,6 +713,7 @@ class SmartMatchingService
             'resources_meet_minimum' => $resourcesMeetMinimum,
             'program_match_score' => $programMatchScore,
             'proximity_score' => $proximityScore,
+            'ranking_score' => $rankingScore,
             'match_score' => $matchScore,
         ];
     }
@@ -1011,7 +1032,7 @@ class SmartMatchingService
 
     private function aiExplanationCacheKey(array $payload, Activity $requirements, array $candidate): string
     {
-        return 'sm:explanation:v1:'.hash('sha256', json_encode([
+        return 'sm:explanation:'.self::AI_PROMPT_VERSION.':'.hash('sha256', json_encode([
             'region_id' => $candidate['region_id'],
             'payload' => $payload,
             'requirements' => [
