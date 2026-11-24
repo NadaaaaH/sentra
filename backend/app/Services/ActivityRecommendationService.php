@@ -14,6 +14,8 @@ use UnexpectedValueException;
 
 class ActivityRecommendationService
 {
+    private const PROMPT_VERSION = 'v4';
+
     private const CATEGORY_LABELS = [
         'kesehatan' => 'Kesehatan',
         'pendidikan' => 'Pendidikan',
@@ -25,7 +27,7 @@ class ActivityRecommendationService
     public function generate(Desa $desa, array $context = []): array
     {
         $context = array_intersect_key($context, array_flip(['bidang', 'budget', 'people', 'duration']));
-        $cacheKey = 'activity-recommendations:v3:'.hash(
+        $cacheKey = 'activity-recommendations:'.self::PROMPT_VERSION.':'.hash(
             'sha256',
             json_encode([
                 'desa' => (string) $desa->kode_desa,
@@ -490,8 +492,14 @@ class ActivityRecommendationService
                 || ! is_numeric($item['duration'])
                 || (float) $item['budget_min'] < 0
                 || (float) $item['budget_max'] < (float) $item['budget_min']
-                || (int) $item['people'] < 1
-                || (int) $item['duration'] < 1
+                || (float) $item['budget_max'] > ((float) $item['budget_min'] * 100)
+                || ! is_int($item['people'])
+                || ! is_int($item['duration'])
+                || $item['people'] < 1
+                || $item['duration'] < 1
+                || mb_strlen(trim($item['title'])) > 120
+                || mb_strlen(trim($item['summary'])) > 300
+                || mb_strlen(trim($item['explanation'])) > 400
             ) {
                 throw new UnexpectedValueException('Saran AI Gemini tidak valid.');
             }
@@ -526,21 +534,27 @@ class ActivityRecommendationService
         $context = match ($category) {
             'kesehatan' => $desa->jarak_faskes_fix_km === null
                 ? 'indikator kesehatan desa yang tersedia'
-                : sprintf('jarak fasilitas kesehatan %.1f km', $desa->jarak_faskes_fix_km),
+                : sprintf('jarak fasilitas kesehatan %s km', $this->formatPanelNumber((float) $desa->jarak_faskes_fix_km)),
             'pendidikan' => $desa->jarak_sekolah_resmi_km === null
                 ? 'data akses pendidikan yang tersedia'
-                : sprintf('jarak sekolah resmi %.1f km', $desa->jarak_sekolah_resmi_km),
+                : sprintf('jarak sekolah resmi %s km', $this->formatPanelNumber((float) $desa->jarak_sekolah_resmi_km)),
             'internet' => $kabupaten?->akses_internet_layak_persen === null
                 ? 'data akses internet wilayah yang tersedia'
-                : sprintf('akses internet layak kabupaten %.1f%%', $kabupaten->akses_internet_layak_persen),
+                : sprintf(
+                    'kesenjangan akses internet layak kabupaten/kota %s%%',
+                    $this->formatPanelNumber(round(100 - (float) $kabupaten->akses_internet_layak_persen, 2)),
+                ),
             'infrastruktur' => $this->infrastructureSummary($desa),
             'ekonomi' => $desa->ike_2024 === null
                 ? 'data ekonomi desa yang tersedia'
-                : sprintf('indeks ekonomi desa %.2f', $desa->ike_2024),
+                : sprintf(
+                    'kesenjangan kondisi ekonomi (IKE) %s%%',
+                    $this->formatPanelNumber(round((1 - (float) $desa->ike_2024) * 100)),
+                ),
             default => 'indikator wilayah yang tersedia',
         };
 
-        return "Kegiatan ini relevan dengan {$context} yang tercatat untuk desa.";
+        return "Kegiatan ini relevan dengan {$context}.";
     }
 
     private function infrastructureSummary(Desa $desa): string
@@ -548,13 +562,26 @@ class ActivityRecommendationService
         $kabupaten = $desa->kecamatan?->kabupaten;
         $indicators = [];
         if ($desa->ikl_2024 !== null) {
-            $indicators[] = sprintf('indeks kualitas lahan %.2f', $desa->ikl_2024);
+            $indicators[] = sprintf(
+                'kesenjangan kualitas lahan (IKL) %s%%',
+                $this->formatPanelNumber(round((1 - (float) $desa->ikl_2024) * 100)),
+            );
         }
         if ($kabupaten?->akses_air_minum_persen !== null) {
-            $indicators[] = sprintf('akses air minum kabupaten %.1f%%', $kabupaten->akses_air_minum_persen);
+            $indicators[] = sprintf(
+                'kesenjangan akses air minum kabupaten/kota %s%%',
+                $this->formatPanelNumber(round(100 - (float) $kabupaten->akses_air_minum_persen, 2)),
+            );
         }
 
         return $indicators === [] ? 'data infrastruktur wilayah yang tersedia' : implode(' dan ', $indicators);
+    }
+
+    private function formatPanelNumber(float $value): string
+    {
+        $formatted = number_format($value, 2, ',', '.');
+
+        return rtrim(rtrim($formatted, '0'), ',');
     }
 
     private function indexGap(float $index): float

@@ -135,6 +135,86 @@ class ActivityRecommendationTest extends TestCase
         }
     }
 
+    public function test_template_explanation_numbers_match_detail_resource_values(): void
+    {
+        config(['services.gemini.key' => null]);
+
+        $detail = $this->getJson('/api/v1/regions/desa/3301012001?include_recommendations=false')
+            ->assertOk()
+            ->json('data');
+        $gaps = array_column($detail['kesenjangan'], 'nilai', 'label');
+        $expectedContexts = [
+            'internet' => sprintf(
+                'kesenjangan akses internet layak kabupaten/kota %s%%',
+                $this->panelNumber($gaps['Akses Internet Layak']),
+            ),
+            'infrastruktur' => sprintf(
+                'kesenjangan kualitas lahan (IKL) %s%% dan kesenjangan akses air minum kabupaten/kota %s%%',
+                $this->panelNumber($gaps['Kualitas Lahan']),
+                $this->panelNumber($gaps['Akses Air Minum']),
+            ),
+            'ekonomi' => sprintf(
+                'kesenjangan kondisi ekonomi (IKE) %s%%',
+                $this->panelNumber($gaps['Kondisi Ekonomi']),
+            ),
+            'kesehatan' => sprintf(
+                'jarak fasilitas kesehatan %s km',
+                $this->panelNumber($detail['jarakFaskesKm']),
+            ),
+            'pendidikan' => sprintf(
+                'jarak sekolah resmi %s km',
+                $this->panelNumber($detail['jarakSekolahKm']),
+            ),
+        ];
+
+        foreach ($expectedContexts as $category => $expectedContext) {
+            $recommendations = $this->getJson(
+                "/api/v1/regions/desa/3301012001/recommendations?bidang={$category}&budget=3000000&people=4&duration=14",
+            )
+                ->assertOk()
+                ->assertJsonPath('data.ai_available', false)
+                ->json('data.recommendations');
+
+            foreach ($recommendations as $recommendation) {
+                $this->assertStringContainsString(
+                    $expectedContext,
+                    $recommendation['explanation'],
+                    "Template untuk kategori {$category} harus memakai angka dari detail desa.",
+                );
+            }
+        }
+    }
+
+    public function test_ai_recommendations_reject_non_integer_people(): void
+    {
+        $this->assertInvalidAiRecommendationsFallBack(['people' => 4.5]);
+    }
+
+    public function test_ai_recommendations_reject_non_integer_duration(): void
+    {
+        $this->assertInvalidAiRecommendationsFallBack(['duration' => 14.5]);
+    }
+
+    public function test_ai_recommendations_reject_budget_max_over_one_hundred_times_budget_min(): void
+    {
+        $this->assertInvalidAiRecommendationsFallBack(['budget_max' => 100000001]);
+    }
+
+    public function test_ai_recommendations_reject_titles_over_120_characters(): void
+    {
+        $this->assertInvalidAiRecommendationsFallBack(['title' => str_repeat('T', 121)]);
+    }
+
+    public function test_ai_recommendations_reject_summaries_over_300_characters(): void
+    {
+        $this->assertInvalidAiRecommendationsFallBack(['summary' => str_repeat('S', 301)]);
+    }
+
+    public function test_ai_recommendations_reject_explanations_over_400_characters(): void
+    {
+        $this->assertInvalidAiRecommendationsFallBack(['explanation' => str_repeat('E', 401)]);
+    }
+
     public function test_identical_explanation_uses_template_for_only_that_dataset_item(): void
     {
         config([
@@ -477,6 +557,7 @@ class ActivityRecommendationTest extends TestCase
         $request,
         ?callable $datasetExplanation = null,
         string $datasetExplanationVariant = 'valid',
+        array $aiRecommendationOverrides = [],
     )
     {
         $prompt = $request['contents'][0]['parts'][0]['text'];
@@ -502,7 +583,7 @@ class ActivityRecommendationTest extends TestCase
 
         $generated = [
             'ai_recommendations' => array_map(
-                fn (string $category, int $index): array => [
+                fn (string $category, int $index): array => array_merge([
                     'category' => $category,
                     'title' => 'Saran tambahan '.$category.' '.$index,
                     'summary' => 'Kegiatan tambahan sesuai kebutuhan lokal.',
@@ -511,7 +592,7 @@ class ActivityRecommendationTest extends TestCase
                     'budget_max' => 2000000,
                     'people' => 4,
                     'duration' => 14,
-                ],
+                ], $aiRecommendationOverrides),
                 $categories,
                 array_keys($categories),
             ),
@@ -530,5 +611,34 @@ class ActivityRecommendationTest extends TestCase
                 ],
             ]],
         ]);
+    }
+
+    private function assertInvalidAiRecommendationsFallBack(array $overrides): void
+    {
+        config([
+            'services.gemini.key' => 'test-key',
+            'services.gemini.url' => 'https://gemini.test/generate',
+        ]);
+        Http::fake([
+            'https://gemini.test/generate' => fn ($request) => $this->geminiResponse(
+                $request,
+                null,
+                'valid',
+                $overrides,
+            ),
+        ]);
+
+        $this->getJson('/api/v1/regions/desa/3301012001/recommendations?bidang=pendidikan&budget=3000000&people=4&duration=14')
+            ->assertOk()
+            ->assertJsonPath('data.ai_available', false)
+            ->assertJsonCount(3, 'data.recommendations')
+            ->assertJsonPath('data.recommendations.0.source', 'dataset');
+    }
+
+    private function panelNumber(float|int $value): string
+    {
+        $formatted = number_format((float) $value, 2, ',', '.');
+
+        return rtrim(rtrim($formatted, '0'), ',');
     }
 }

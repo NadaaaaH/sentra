@@ -245,6 +245,8 @@ function ProfilWilayah({
   recommendations,
   recommendationsLoading,
   recommendationsError,
+  recommendationContext,
+  onClearRecommendationContext,
   detailKabupaten,
   detailKabupatenLoading,
   detailKabupatenError,
@@ -624,6 +626,23 @@ function ProfilWilayah({
           {isDesa && (
             <section className={rekomendasiTampil ? 'bagian-fade-in' : ''}>
               <Judul ikon={Lightbulb}>Rekomendasi Kegiatan</Judul>
+              {recommendationContext && (
+                <div className="mb-3 flex items-center justify-between gap-3 rounded-xl border border-sentra-green/20 bg-sentra-green/5 px-3 py-2">
+                  <p className="text-xs leading-relaxed text-gray-700">
+                    Sesuai rencana: {LABEL_BIDANG[recommendationContext.bidang] ?? recommendationContext.bidang}
+                    {' · '}{formatAnggaran(recommendationContext.budget)}
+                    {' · '}{recommendationContext.people} orang
+                    {' · '}{recommendationContext.duration} hari
+                  </p>
+                  <button
+                    type="button"
+                    onClick={onClearRecommendationContext}
+                    className="shrink-0 rounded-lg px-2 py-1 text-xs font-semibold text-sentra-green hover:bg-sentra-green/10"
+                  >
+                    Hapus
+                  </button>
+                </div>
+              )}
               {!rekomendasiTampil ? (
                 <LoadingDots label="Memuat rekomendasi kegiatan" />
               ) : recommendationsError ? (

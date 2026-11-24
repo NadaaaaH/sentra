@@ -55,7 +55,9 @@ function recommendationsUrl(kodeDesa, context) {
 
 function JelajahiPeta() {
   const { state } = useLocation()
-  const recommendationContext = state?.recommendationContext ?? null
+  const [recommendationContext, setRecommendationContext] = useState(
+    () => state?.recommendationContext ?? null,
+  )
 
   const desaAwal = state?.wilayahId ? cariWilayahById(state.wilayahId) : null
   const kodeKabAwal = /^\d{10}$/.test(state?.wilayahId ?? '')
@@ -89,6 +91,7 @@ function JelajahiPeta() {
   const [detailKabupatenLoading, setDetailKabupatenLoading] = useState(false)
   const [detailKabupatenError, setDetailKabupatenError] = useState(null)
   const detailRequestRef = useRef(null)
+  const recommendationsRequestRef = useRef(null)
 
   // Perintah ke peta: { jenis: 'reset' | 'lepasDesa', n: counter }
   const [sinyal, setSinyal] = useState({ jenis: null, n: 0 })
@@ -98,8 +101,11 @@ function JelajahiPeta() {
     if (!state?.wilayahId) return undefined
 
     const controller = new AbortController()
+    const recommendationsController = new AbortController()
     detailRequestRef.current = controller
+    recommendationsRequestRef.current = recommendationsController
     const { signal } = controller
+    const recommendationsSignal = recommendationsController.signal
 
     apiFetch(`/api/map/fasilitas-desa/${state.wilayahId}`, { signal })
       .then(async (response) => {
@@ -121,7 +127,7 @@ function JelajahiPeta() {
         if (!signal.aborted) setFasilitasDesaLoading(false)
       })
 
-    apiFetch(detailDesaUrl(state.wilayahId, recommendationContext), { signal })
+    apiFetch(detailDesaUrl(state.wilayahId, state?.recommendationContext ?? null), { signal })
       .then(async (response) => {
         if (!response.ok) throw new Error(`Gagal mengambil detail desa (${response.status})`)
         const result = await response.json()
@@ -139,29 +145,34 @@ function JelajahiPeta() {
         if (!signal.aborted) setDetailDesaLoading(false)
       })
 
-    apiFetch(recommendationsUrl(state.wilayahId, recommendationContext), { signal })
+    apiFetch(recommendationsUrl(state.wilayahId, state?.recommendationContext ?? null), {
+      signal: recommendationsSignal,
+    })
       .then(async (response) => {
         if (!response.ok) throw new Error(`Gagal mengambil rekomendasi kegiatan (${response.status})`)
         const result = await response.json()
-        if (signal.aborted) return
+        if (recommendationsSignal.aborted) return
         if (result.status !== 'success' || !result.data) {
           throw new Error(result.message ?? 'Data rekomendasi tidak tersedia')
         }
         setRecommendations(result.data.recommendations)
       })
       .catch((error) => {
-        if (!signal.aborted) {
+        if (!recommendationsSignal.aborted) {
           console.error('Gagal ambil rekomendasi kegiatan:', error)
           setRecommendationsError('Gagal memuat rekomendasi kegiatan.')
           setRecommendations([])
         }
       })
       .finally(() => {
-        if (!signal.aborted) setRecommendationsLoading(false)
+        if (!recommendationsSignal.aborted) setRecommendationsLoading(false)
       })
 
-    return () => controller.abort()
-  }, [state?.wilayahId, recommendationContext])
+    return () => {
+      controller.abort()
+      recommendationsController.abort()
+    }
+  }, [state?.wilayahId, state?.recommendationContext])
 
   useEffect(() => {
     if (profil?.jenis !== 'Desa' || detailDesaLoading) return undefined
@@ -187,9 +198,13 @@ function JelajahiPeta() {
     if (tipe === 'desa') {
       const p = feature.properties
       detailRequestRef.current?.abort()
+      recommendationsRequestRef.current?.abort()
       const controller = new AbortController()
+      const recommendationsController = new AbortController()
       detailRequestRef.current = controller
+      recommendationsRequestRef.current = recommendationsController
       const { signal } = controller
+      const recommendationsSignal = recommendationsController.signal
 
       setProfil({
         jenis: 'Desa',
@@ -241,7 +256,7 @@ function JelajahiPeta() {
           if (!signal.aborted) setFasilitasDesaLoading(false)
         })
 
-      const context = state?.wilayahId === p.kode_desa ? recommendationContext : null
+      const context = recommendationContext
       apiFetch(detailDesaUrl(p.kode_desa, context), { signal })
         .then(async (response) => {
           if (!response.ok) throw new Error(`Gagal mengambil detail desa (${response.status})`)
@@ -260,28 +275,29 @@ function JelajahiPeta() {
           if (!signal.aborted) setDetailDesaLoading(false)
         })
 
-      apiFetch(recommendationsUrl(p.kode_desa, context), { signal })
+      apiFetch(recommendationsUrl(p.kode_desa, context), { signal: recommendationsSignal })
         .then(async (response) => {
           if (!response.ok) throw new Error(`Gagal mengambil rekomendasi kegiatan (${response.status})`)
           const result = await response.json()
-          if (signal.aborted) return
+          if (recommendationsSignal.aborted) return
           if (result.status !== 'success' || !result.data) {
             throw new Error(result.message ?? 'Data rekomendasi tidak tersedia')
           }
           setRecommendations(result.data.recommendations)
         })
         .catch((error) => {
-          if (!signal.aborted) {
+          if (!recommendationsSignal.aborted) {
             console.error('Gagal ambil rekomendasi kegiatan:', error)
             setRecommendationsError('Gagal memuat rekomendasi kegiatan.')
             setRecommendations([])
           }
         })
         .finally(() => {
-          if (!signal.aborted) setRecommendationsLoading(false)
+          if (!recommendationsSignal.aborted) setRecommendationsLoading(false)
         })
     } else {
       detailRequestRef.current?.abort()
+      recommendationsRequestRef.current?.abort()
       const controller = new AbortController()
       detailRequestRef.current = controller
       const label = feature.properties.label ?? ''
@@ -335,14 +351,51 @@ function JelajahiPeta() {
           if (!controller.signal.aborted) setDetailKabupatenLoading(false)
         })
     }
-  }, [recommendationContext, state?.wilayahId])
+  }, [recommendationContext])
+
+  const handleClearRecommendationContext = useCallback(() => {
+    setRecommendationContext(null)
+    if (profil?.jenis !== 'Desa' || !profil.kodeDesa) return
+
+    recommendationsRequestRef.current?.abort()
+    const controller = new AbortController()
+    recommendationsRequestRef.current = controller
+    const { signal } = controller
+
+    setRecommendations(null)
+    setRecommendationsError(null)
+    setRecommendationsLoading(true)
+
+    apiFetch(recommendationsUrl(profil.kodeDesa, null), { signal })
+      .then(async (response) => {
+        if (!response.ok) throw new Error(`Gagal mengambil rekomendasi kegiatan (${response.status})`)
+        const result = await response.json()
+        if (signal.aborted) return
+        if (result.status !== 'success' || !result.data) {
+          throw new Error(result.message ?? 'Data rekomendasi tidak tersedia')
+        }
+        setRecommendations(result.data.recommendations)
+      })
+      .catch((error) => {
+        if (!signal.aborted) {
+          console.error('Gagal ambil rekomendasi kegiatan:', error)
+          setRecommendationsError('Gagal memuat rekomendasi kegiatan.')
+          setRecommendations([])
+        }
+      })
+      .finally(() => {
+        if (!signal.aborted) setRecommendationsLoading(false)
+      })
+  }, [profil])
 
   // Tombol X di panel profil:
   // - dari profil desa      -> tetap di peta desa kabupaten tsb
   // - dari profil kabupaten -> kembali ke peta Jawa Tengah
   const handleTutupProfil = () => {
     detailRequestRef.current?.abort()
+    recommendationsRequestRef.current?.abort()
     detailRequestRef.current = null
+    recommendationsRequestRef.current = null
     const dariDesa = profil?.jenis === 'Desa'
     setProfilTerbuka(false)
     setFasilitasDesa(null)
@@ -369,7 +422,9 @@ function JelajahiPeta() {
   // Tombol "Kembali ke Peta Kabupaten" di peta
   const handleKembaliKePeta = () => {
     detailRequestRef.current?.abort()
+    recommendationsRequestRef.current?.abort()
     detailRequestRef.current = null
+    recommendationsRequestRef.current = null
     setProfilTerbuka(false)
     setTerpilihId(null)
     setFasilitasDesa(null)
@@ -441,6 +496,8 @@ function JelajahiPeta() {
           recommendations={recommendations}
           recommendationsLoading={recommendationsLoading}
           recommendationsError={recommendationsError}
+          recommendationContext={recommendationContext}
+          onClearRecommendationContext={handleClearRecommendationContext}
           detailKabupaten={detailKabupaten}
           detailKabupatenLoading={detailKabupatenLoading}
           detailKabupatenError={detailKabupatenError}
